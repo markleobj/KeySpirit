@@ -227,16 +227,37 @@ class FloatingWindowService : Service() {
         }
     }
 
+    private var touchIndicator: View? = null
+
     private fun showRecordingOverlay() {
-        recordingOverlay = View(this).apply {
-            setBackgroundColor(0x00000000) // 完全透明
-            setOnTouchListener { _, event ->
-                touchRecorder.onTouchEvent(event)
-                // 将事件转发给无障碍服务，让底层 App 响应
-                touchRecorder.dispatchToApp(event)
-                true
-            }
+        // 用 FrameLayout 承载透明触摸层 + 触摸点指示器
+        val container = android.widget.FrameLayout(this).apply {
+            setBackgroundColor(0x00000000)
         }
+
+        // 触摸点指示器（红色小圆点），实时显示触摸位置
+        touchIndicator = View(this).apply {
+            setBackgroundColor(android.graphics.Color.RED)
+            alpha = 0.7f
+            visibility = View.GONE
+        }
+        val indicatorSize = 30
+        container.addView(touchIndicator, android.widget.FrameLayout.LayoutParams(indicatorSize, indicatorSize))
+
+        container.setOnTouchListener { _, event ->
+            // 更新指示器位置（以触摸点为中心）
+            touchIndicator?.let { ind ->
+                ind.x = event.rawX - indicatorSize / 2f
+                ind.y = event.rawY - indicatorSize / 2f
+                ind.visibility = if (event.action == MotionEvent.ACTION_UP) View.GONE else View.VISIBLE
+            }
+            android.util.Log.d("RecordTouch", "action=${event.action} rawX=${event.rawX} rawY=${event.rawY}")
+            touchRecorder.onTouchEvent(event)
+            touchRecorder.dispatchToApp(event)
+            true
+        }
+
+        recordingOverlay = container
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -647,35 +668,43 @@ class FloatingWindowService : Service() {
         hidePanel()
         val service = com.keyspirit.service.ScreenCaptureService.instance
         if (service == null) {
-            showDiagnosticDialog("截屏服务未启动，请先在 App 首页授权截屏权限")
+            toast("截屏服务未启动，请先在 App 首页授权截屏权限", long = true)
             return
         }
+        toast("正在截图...")
         // 在后台线程截屏（captureScreen 是同步阻塞方法）
         Thread {
-            val bitmap = service.captureScreen()
-            if (bitmap == null) {
-                handler.post {
-                    showDiagnosticDialog("截屏失败\n\n${service.getDiagnosticInfo()}")
+            try {
+                val bitmap = service.captureScreen()
+                if (bitmap == null) {
+                    handler.post {
+                        toast("截屏失败\n${service.getDiagnosticInfo()}", long = true)
+                    }
+                    return@Thread
                 }
-                return@Thread
-            }
-            // 如果没有当前项目，自动创建一个默认项目
-            var scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
-            var scriptName = com.keyspirit.util.CurrentProjectHolder.currentScriptName
-            if (scriptId == null) {
-                val defaultScript = com.keyspirit.script.Script(name = "默认项目")
-                scriptManager.saveScript(defaultScript)
-                scriptId = defaultScript.id
-                scriptName = defaultScript.name
-                com.keyspirit.util.CurrentProjectHolder.currentScriptId = scriptId
-                com.keyspirit.util.CurrentProjectHolder.currentScriptName = scriptName
-            }
-            val path = com.keyspirit.util.ScreenshotUtils.saveToProject(this, bitmap, scriptId)
-            handler.post {
-                if (path != null) {
-                    toast("已保存到【$scriptName】: ${path.substringAfterLast('/')}")
-                } else {
-                    toast("截图保存失败")
+                // 如果没有当前项目，自动创建一个默认项目
+                var scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
+                var scriptName = com.keyspirit.util.CurrentProjectHolder.currentScriptName
+                if (scriptId == null) {
+                    val defaultScript = com.keyspirit.script.Script(name = "默认项目")
+                    scriptManager.saveScript(defaultScript)
+                    scriptId = defaultScript.id
+                    scriptName = defaultScript.name
+                    com.keyspirit.util.CurrentProjectHolder.currentScriptId = scriptId
+                    com.keyspirit.util.CurrentProjectHolder.currentScriptName = scriptName
+                }
+                val path = com.keyspirit.util.ScreenshotUtils.saveToProject(this, bitmap, scriptId)
+                handler.post {
+                    if (path != null) {
+                        toast("已保存到【$scriptName】: ${path.substringAfterLast('/')}")
+                    } else {
+                        toast("截图保存失败")
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("FloatingWindow", "截图线程异常", e)
+                handler.post {
+                    toast("截图异常: ${e.message}", long = true)
                 }
             }
         }.start()
@@ -710,9 +739,9 @@ class FloatingWindowService : Service() {
         floatingBall = null
     }
 
-    private fun toast(msg: String) {
+    private fun toast(msg: String, long: Boolean = false) {
         handler.post {
-            android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(this, msg, if (long) android.widget.Toast.LENGTH_LONG else android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
