@@ -118,7 +118,13 @@ class FloatingWindowService : Service() {
         if (floatingBall != null) return
         floatingBall = FloatingBallView(this).apply {
             iconText = "▶"
-            onTap = { togglePanel() }
+            onTap = {
+                if (isRecording) {
+                    stopRecording()
+                } else {
+                    togglePanel()
+                }
+            }
             onDrag = { x, y -> updateBallPosition(x, y) }
         }
         val params = createOverlayParams(120, 120).apply {

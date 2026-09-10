@@ -1,6 +1,5 @@
 package com.keyspirit.record
 
-import android.graphics.Path
 import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
@@ -19,13 +18,11 @@ class TouchRecorder {
     private val steps = mutableListOf<ScriptStep>()
     private var isRecording = false
 
-    // 当前手势状态
+    // 当前手势状态（使用屏幕绝对坐标 rawX/rawY）
     private var downX = 0f
     private var downY = 0f
     private var downTime = 0L
     private var hasMoved = false
-    private var lastX = 0f
-    private var lastY = 0f
 
     fun startRecording() {
         steps.clear()
@@ -46,27 +43,23 @@ class TouchRecorder {
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                downX = event.x
-                downY = event.y
-                lastX = event.x
-                lastY = event.y
+                downX = event.rawX
+                downY = event.rawY
                 downTime = SystemClock.elapsedRealtime()
                 hasMoved = false
             }
 
             MotionEvent.ACTION_MOVE -> {
-                val dx = Math.abs(event.x - downX)
-                val dy = Math.abs(event.y - downY)
+                val dx = Math.abs(event.rawX - downX)
+                val dy = Math.abs(event.rawY - downY)
                 if (dx > SWIPE_DISTANCE_THRESHOLD || dy > SWIPE_DISTANCE_THRESHOLD) {
                     hasMoved = true
                 }
-                lastX = event.x
-                lastY = event.y
             }
 
             MotionEvent.ACTION_UP -> {
-                val upX = event.x
-                val upY = event.y
+                val upX = event.rawX
+                val upY = event.rawY
                 val duration = SystemClock.elapsedRealtime() - downTime
 
                 if (hasMoved) {
@@ -97,38 +90,31 @@ class TouchRecorder {
                 }
 
                 // 在步骤之间添加默认延迟
-                if (steps.isNotEmpty()) {
-                    steps.add(ScriptStep(
-                        type = StepType.DELAY,
-                        delay = 500
-                    ))
-                }
+                steps.add(ScriptStep(
+                    type = StepType.DELAY,
+                    delay = 500
+                ))
 
-                Log.d(TAG, "录制步骤: ${steps.lastOrNull()?.getDescription()}")
+                Log.d(TAG, "录制步骤: ${steps[steps.size - 2].getDescription()}")
             }
         }
     }
 
     /**
-     * 将录制的手势实时转发给无障碍服务，让底层 App 能响应
+     * 将录制的手势转发给无障碍服务，让底层 App 能响应
+     * 在 UP 时根据完整手势 dispatch
      */
     fun dispatchToApp(event: MotionEvent) {
+        if (event.actionMasked != MotionEvent.ACTION_UP) return
         val service = AutoAccessibilityService.instance ?: return
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                // 不立即 dispatch，等 UP 时一起 dispatch 完整手势
-            }
-            MotionEvent.ACTION_UP -> {
-                if (hasMoved) {
-                    service.swipe(
-                        downX.toInt(), downY.toInt(),
-                        event.x.toInt(), event.y.toInt(),
-                        (SystemClock.elapsedRealtime() - downTime).coerceIn(100, 5000)
-                    )
-                } else {
-                    service.click(downX.toInt(), downY.toInt())
-                }
-            }
+        if (hasMoved) {
+            service.swipe(
+                downX.toInt(), downY.toInt(),
+                event.rawX.toInt(), event.rawY.toInt(),
+                (SystemClock.elapsedRealtime() - downTime).coerceIn(100, 5000)
+            )
+        } else {
+            service.click(downX.toInt(), downY.toInt())
         }
     }
 }
