@@ -56,7 +56,16 @@ class ScreenCaptureService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, createNotification())
+        // Android 10+ 需要在 startForeground 中指定前台服务类型
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                createNotification(),
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, createNotification())
+        }
 
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
         val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
@@ -88,6 +97,9 @@ class ScreenCaptureService : Service() {
                 screenWidth = it.width()
                 screenHeight = it.height()
             }
+            // R+ 也需要获取 density
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealMetrics(metrics)
         } else {
             @Suppress("DEPRECATION")
             wm.defaultDisplay.getRealMetrics(metrics)

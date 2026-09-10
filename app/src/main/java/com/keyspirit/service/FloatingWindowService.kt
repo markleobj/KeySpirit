@@ -65,7 +65,16 @@ class FloatingWindowService : Service() {
         instance = this
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         scriptManager = KeySpiritApp.instance.scriptManager
-        startForeground(NOTIFICATION_ID, createNotification())
+        // Android 10+ 需要在 startForeground 中指定前台服务类型
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                createNotification(),
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, createNotification())
+        }
         showFloatingBall()
     }
 

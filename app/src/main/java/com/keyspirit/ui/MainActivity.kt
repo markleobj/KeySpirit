@@ -76,16 +76,20 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQUEST_SCREEN_CAPTURE) {
             if (resultCode == RESULT_OK && data != null) {
                 // 启动截屏服务
-                val intent = Intent(this, ScreenCaptureService::class.java).apply {
-                    putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, resultCode)
-                    putExtra(ScreenCaptureService.EXTRA_DATA, data)
+                try {
+                    val intent = Intent(this, ScreenCaptureService::class.java).apply {
+                        putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, resultCode)
+                        putExtra(ScreenCaptureService.EXTRA_DATA, data)
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
+                    Toast.makeText(this, "截屏服务已启动", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "截屏服务启动失败: ${e.message}", Toast.LENGTH_LONG).show()
                 }
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    startForegroundService(intent)
-                } else {
-                    startService(intent)
-                }
-                Toast.makeText(this, "截屏服务已启动", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(this, "未授权截屏，找图/找文字/截图功能不可用", Toast.LENGTH_LONG).show()
             }
