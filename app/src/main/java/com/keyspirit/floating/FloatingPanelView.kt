@@ -14,9 +14,8 @@ class FloatingPanelView(context: Context) : LinearLayout(context) {
 
     var onRecord: (() -> Unit)? = null
     var onStopRecord: (() -> Unit)? = null
-    var onPickCoordinate: (() -> Unit)? = null
-    var onPickRegion: (() -> Unit)? = null
-    var onScreenshot: (() -> Unit)? = null
+    var onEdit: (() -> Unit)? = null
+    var onSave: (() -> Unit)? = null
     var onExecute: (() -> Unit)? = null
     var onPause: (() -> Unit)? = null
     var onStopExecute: (() -> Unit)? = null
@@ -39,9 +38,8 @@ class FloatingPanelView(context: Context) : LinearLayout(context) {
         when (mode) {
             PanelMode.HOME -> {
                 addButton("录制", "#E74C3C") { onRecord?.invoke() }
-                addButton("截图", "#9B59B6") { onScreenshot?.invoke() }
-                addButton("取坐标", "#3498DB") { onPickCoordinate?.invoke() }
-                addButton("框选区域", "#1ABC9C") { onPickRegion?.invoke() }
+                addButton("编辑", "#3498DB") { onEdit?.invoke() }
+                addButton("保存", "#9B59B6") { onSave?.invoke() }
                 addButton("运行", "#2E7D32") { onExecute?.invoke() }
                 addButton("✕", "#95A5A6") { onClose?.invoke() }
                 // 版本号显示

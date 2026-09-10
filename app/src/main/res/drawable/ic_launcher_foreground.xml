@@ -4,13 +4,20 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- 白色播放三角形（居中，带圆角感） -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M54,30 L54,78 M42,42 L66,42 M42,54 L66,54 M42,66 L66,66"
-        android:strokeWidth="4"
-        android:strokeColor="#FFFFFF"
-        android:strokeLineCap="round" />
+        android:pathData="M44,36 L44,72 Q44,76 48,74 L76,56 Q80,54 76,52 L48,34 Q44,32 44,36 Z" />
+
+    <!-- 右上角小星星（闪光），表示自动化/魔法 -->
+    <path
+        android:fillColor="#FFD93D"
+        android:pathData="M74,24 L76,30 L82,32 L76,34 L74,40 L72,34 L66,32 L72,30 Z" />
+
+    <!-- 左下角小星点 -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M70,30 L70,78 L78,78 L78,30 Z" />
+        android:fillAlpha="0.9"
+        android:pathData="M34,76 L35,79 L38,80 L35,81 L34,84 L33,81 L30,80 L33,79 Z" />
 </vector>

@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
@@ -24,6 +25,8 @@ import com.keyspirit.record.TouchRecorder
 import com.keyspirit.script.Script
 import com.keyspirit.script.ScriptExecutor
 import com.keyspirit.script.ScriptManager
+import com.keyspirit.script.ScriptStep
+import com.keyspirit.script.StepType
 
 class FloatingWindowService : Service() {
 
@@ -117,9 +120,9 @@ class FloatingWindowService : Service() {
     private fun showFloatingBall() {
         if (floatingBall != null) return
         floatingBall = FloatingBallView(this).apply {
-            iconText = "▶"
+            state = FloatingBallView.BallState.IDLE
             onTap = {
-                if (isRecording) {
+                if (this@FloatingWindowService.isRecording) {
                     stopRecording()
                 } else {
                     togglePanel()
@@ -162,9 +165,8 @@ class FloatingWindowService : Service() {
             }
             onRecord = { startRecording() }
             onStopRecord = { stopRecording() }
-            onPickCoordinate = { pickCoordinate() }
-            onPickRegion = { pickRegion() }
-            onScreenshot = { takeScreenshot() }
+            onEdit = { openEditor() }
+            onSave = { saveCurrentScript() }
             onExecute = { showScriptList() }
             onPause = { pauseExecution() }
             onStopExecute = { stopExecution() }
@@ -199,8 +201,7 @@ class FloatingWindowService : Service() {
         }
         isRecording = true
         touchRecorder.startRecording()
-        floatingBall?.isRecording = true
-        floatingBall?.iconText = "●"
+        floatingBall?.state = FloatingBallView.BallState.RECORDING
         hidePanel()
         showRecordingOverlay()
         toast("开始录制，操作完成后点击停止")
@@ -209,8 +210,7 @@ class FloatingWindowService : Service() {
     private fun stopRecording() {
         isRecording = false
         val steps = touchRecorder.stopRecording()
-        floatingBall?.isRecording = false
-        floatingBall?.iconText = "▶"
+        floatingBall?.state = FloatingBallView.BallState.IDLE
         hideRecordingOverlay()
         hidePanel()
 
@@ -229,6 +229,490 @@ class FloatingWindowService : Service() {
 
     private var touchIndicator: View? = null
     private var coordTextView: android.widget.TextView? = null
+
+    // ============ 悬浮脚本编辑器 ============
+    private var editorView: com.keyspirit.floating.FloatingEditorView? = null
+    private var editingScript: Script? = null
+    // 待添加的步骤类型（交互式选取完成后回填）
+    private var pendingStepType: StepType? = null
+
+    private fun openEditor() {
+        hidePanel()
+        if (editorView != null) return
+
+        // 用当前项目的脚本，没有就新建
+        val scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
+        val script = if (scriptId != null) {
+            scriptManager.getScript(scriptId)
+        } else null
+        editingScript = script ?: Script(name = "新脚本")
+
+        editorView = com.keyspirit.floating.FloatingEditorView(this).apply {
+            setScript(editingScript!!)
+            listener = object : com.keyspirit.floating.FloatingEditorView.EditorListener {
+                override fun onAddStep(type: StepType) {
+                    handleAddStep(type)
+                }
+                override fun onEditStep(position: Int, step: ScriptStep) {
+                    // 编辑步骤：根据类型重新交互式设置
+                    pendingStepType = step.type
+                    when (step.type) {
+                        StepType.CLICK, StepType.LONG_PRESS -> startCoordinatePickForStep(step)
+                        StepType.FIND_IMAGE -> startRegionPickForFindImage(step)
+                        StepType.FIND_TEXT -> startRegionPickForFindText(step)
+                        StepType.SWIPE -> startSwipePickForStep(step)
+                        StepType.DELAY -> showDelayDialog(step)
+                        else -> {}
+                    }
+                }
+                override fun onDeleteStep(position: Int) {
+                    editingScript?.steps?.removeAt(position)
+                    editorView?.refreshStepList()
+                }
+                override fun onSave() {
+                    editingScript?.let {
+                        it.name = it.name.ifEmpty { "未命名脚本" }
+                        scriptManager.saveScript(it)
+                        com.keyspirit.util.CurrentProjectHolder.currentScriptId = it.id
+                        com.keyspirit.util.CurrentProjectHolder.currentScriptName = it.name
+                        toast("已保存")
+                    }
+                }
+                override fun onRun() {
+                    editingScript?.let {
+                        it.name = it.name.ifEmpty { "未命名脚本" }
+                        scriptManager.saveScript(it)
+                        startExecution(it)
+                        closeEditor()
+                    }
+                }
+                override fun onClose() {
+                    closeEditor()
+                }
+            }
+        }
+
+        val params = createOverlayParams(
+            (resources.displayMetrics.widthPixels * 0.9).toInt(),
+            (resources.displayMetrics.heightPixels * 0.7).toInt()
+        ).apply {
+            gravity = Gravity.CENTER
+        }
+        windowManager.addView(editorView, params)
+    }
+
+    private fun closeEditor() {
+        editorView?.let { windowManager.removeView(it) }
+        editorView = null
+        editingScript = null
+        pendingStepType = null
+    }
+
+    /**
+     * 保存当前脚本（悬浮编辑器中的脚本 或 CurrentProjectHolder 中的当前脚本）
+     */
+    private fun saveCurrentScript() {
+        val script = editingScript ?: run {
+            val id = com.keyspirit.util.CurrentProjectHolder.currentScriptId
+            if (id != null) scriptManager.getScript(id) else null
+        }
+        if (script == null) {
+            toast("没有可保存的脚本")
+            return
+        }
+        script.name = script.name.ifEmpty { "未命名脚本" }
+        scriptManager.saveScript(script)
+        com.keyspirit.util.CurrentProjectHolder.currentScriptId = script.id
+        com.keyspirit.util.CurrentProjectHolder.currentScriptName = script.name
+        toast("已保存: ${script.name}")
+    }
+
+    /**
+     * 处理添加步骤：根据类型进入不同的交互式选取流程
+     */
+    private fun handleAddStep(type: StepType) {
+        pendingStepType = type
+        when (type) {
+            StepType.CLICK, StepType.LONG_PRESS -> startCoordinatePickForStep(null)
+            StepType.FIND_IMAGE -> startRegionPickForFindImage(null)
+            StepType.FIND_TEXT -> startRegionPickForFindText(null)
+            StepType.SWIPE -> startSwipePickForStep(null)
+            StepType.DELAY -> showDelayDialog(null)
+            else -> {
+                // 其他类型直接添加空步骤
+                editingScript?.steps?.add(ScriptStep(type = type))
+                editorView?.refreshStepList()
+            }
+        }
+    }
+
+    /**
+     * 坐标选取模式：用于点击/长按步骤
+     * existingStep 不为空表示编辑已有步骤
+     */
+    private fun startCoordinatePickForStep(existingStep: ScriptStep?) {
+        closeEditor()
+        floatingBall?.visibility = View.GONE
+
+        val overlay = View(this).apply {
+            setBackgroundColor(0x33000000)
+            setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_MOVE -> {
+                        showPickerToast("X: ${event.rawX.toInt()}, Y: ${event.rawY.toInt()}（松开确认）")
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val x = event.rawX.toInt()
+                        val y = event.rawY.toInt()
+                        removePickerOverlay()
+                        floatingBall?.visibility = View.VISIBLE
+                        val type = pendingStepType ?: StepType.CLICK
+                        val step = existingStep ?: ScriptStep(type = type)
+                        step.x = x
+                        step.y = y
+                        if (existingStep == null) {
+                            editingScript?.steps?.add(step)
+                        }
+                        openEditor()
+                        toast("已设置坐标: ($x, $y)")
+                    }
+                }
+                true
+            }
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        windowManager.addView(overlay, params)
+        pickerOverlay = overlay
+        showPickerToast("点击屏幕选取${if (pendingStepType == StepType.LONG_PRESS) "长按" else "点击"}坐标")
+    }
+
+    /**
+     * 滑动坐标选取：依次选取起点和终点
+     */
+    private var swipePickState = 0 // 0=选起点, 1=选终点
+    private var swipeStep: ScriptStep? = null
+
+    private fun startSwipePickForStep(existingStep: ScriptStep?) {
+        swipeStep = existingStep ?: ScriptStep(type = StepType.SWIPE)
+        swipePickState = 0
+        closeEditor()
+        floatingBall?.visibility = View.GONE
+
+        val overlay = View(this).apply {
+            setBackgroundColor(0x33000000)
+            setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_MOVE -> {
+                        val msg = if (swipePickState == 0) "选起点" else "选终点"
+                        showPickerToast("$msg: X: ${event.rawX.toInt()}, Y: ${event.rawY.toInt()}（松开确认）")
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val x = event.rawX.toInt()
+                        val y = event.rawY.toInt()
+                        if (swipePickState == 0) {
+                            swipeStep?.x1 = x
+                            swipeStep?.y1 = y
+                            swipePickState = 1
+                            showPickerToast("已选起点，请选取终点")
+                        } else {
+                            swipeStep?.x2 = x
+                            swipeStep?.y2 = y
+                            removePickerOverlay()
+                            floatingBall?.visibility = View.VISIBLE
+                            if (existingStep == null) {
+                                editingScript?.steps?.add(swipeStep!!)
+                            }
+                            swipeStep = null
+                            openEditor()
+                            toast("滑动已设置")
+                        }
+                    }
+                }
+                true
+            }
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        windowManager.addView(overlay, params)
+        pickerOverlay = overlay
+        showPickerToast("请选取滑动起点")
+    }
+
+    /**
+     * 区域选取模式，用于找图步骤：选区域后自动截图该区域并保存为目标图片
+     */
+    private fun startRegionPickForFindImage(existingStep: ScriptStep?) {
+        closeEditor()
+        floatingBall?.visibility = View.GONE
+        com.keyspirit.util.RegionResultHolder.hasNewResult = false
+
+        var startX = 0f
+        var startY = 0f
+        var regionView: View? = null
+
+        val overlay = View(this).apply {
+            setBackgroundColor(0x33000000)
+            setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        startX = event.rawX
+                        startY = event.rawY
+                        regionView = View(this@FloatingWindowService).apply {
+                            background = createDashedBorder()
+                        }
+                        windowManager.addView(regionView, WindowManager.LayoutParams(
+                            0, 0,
+                            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                            PixelFormat.TRANSLUCENT
+                        ))
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val r = regionView?.layoutParams as? WindowManager.LayoutParams
+                        if (r != null) {
+                            r.x = Math.min(startX, event.rawX).toInt()
+                            r.y = Math.min(startY, event.rawY).toInt()
+                            r.width = Math.abs(event.rawX - startX).toInt()
+                            r.height = Math.abs(event.rawY - startY).toInt()
+                            windowManager.updateViewLayout(regionView, r)
+                        }
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val left = Math.min(startX, event.rawX).toInt()
+                        val top = Math.min(startY, event.rawY).toInt()
+                        val right = Math.max(startX, event.rawX).toInt()
+                        val bottom = Math.max(startY, event.rawY).toInt()
+                        regionView?.let { windowManager.removeView(it) }
+                        removePickerOverlay()
+                        floatingBall?.visibility = View.VISIBLE
+
+                        if (right - left < 20 || bottom - top < 20) {
+                            toast("区域太小，请重新选择")
+                            openEditor()
+                            return@setOnTouchListener true
+                        }
+
+                        // 截取该区域的图片并保存
+                        captureRegionAndSave(left, top, right, bottom, existingStep)
+                    }
+                }
+                true
+            }
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        windowManager.addView(overlay, params)
+        pickerOverlay = overlay
+        showPickerToast("拖动框选找图区域，松开后自动截图")
+    }
+
+    /**
+     * 截取指定区域并保存为找图目标图片
+     */
+    private fun captureRegionAndSave(left: Int, top: Int, right: Int, bottom: Int, existingStep: ScriptStep?) {
+        val service = ScreenCaptureService.instance
+        if (service == null) {
+            toast("截屏服务未启动")
+            openEditor()
+            return
+        }
+        Thread {
+            val bitmap = service.captureScreen()
+            if (bitmap == null) {
+                handler.post {
+                    toast("截屏失败")
+                    openEditor()
+                }
+                return@Thread
+            }
+            // 裁剪区域
+            val cropLeft = left.coerceIn(0, bitmap.width)
+            val cropTop = top.coerceIn(0, bitmap.height)
+            val cropRight = right.coerceIn(cropLeft, bitmap.width)
+            val cropBottom = bottom.coerceIn(cropTop, bitmap.height)
+            val cropped = Bitmap.createBitmap(bitmap, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop)
+
+            // 确保当前脚本已保存（获取 scriptId）
+            val script = editingScript ?: return@Thread
+            if (script.id.isBlank() || scriptManager.getScript(script.id) == null) {
+                script.name = script.name.ifEmpty { "未命名脚本" }
+                scriptManager.saveScript(script)
+            }
+
+            val path = com.keyspirit.util.ScreenshotUtils.saveToProject(this@FloatingWindowService, cropped, script.id)
+            handler.post {
+                if (path != null) {
+                    val step = existingStep ?: ScriptStep(type = StepType.FIND_IMAGE)
+                    step.imagePath = path
+                    step.regionLeft = left
+                    step.regionTop = top
+                    step.regionRight = right
+                    step.regionBottom = bottom
+                    step.useRegion = true
+                    if (existingStep == null) {
+                        editingScript?.steps?.add(step)
+                    }
+                    toast("已截取目标图片并设置区域")
+                } else {
+                    toast("图片保存失败")
+                }
+                openEditor()
+            }
+        }.start()
+    }
+
+    /**
+     * 区域选取模式，用于找文字步骤
+     */
+    private fun startRegionPickForFindText(existingStep: ScriptStep?) {
+        closeEditor()
+        floatingBall?.visibility = View.GONE
+
+        var startX = 0f
+        var startY = 0f
+        var regionView: View? = null
+
+        val overlay = View(this).apply {
+            setBackgroundColor(0x33000000)
+            setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        startX = event.rawX
+                        startY = event.rawY
+                        regionView = View(this@FloatingWindowService).apply {
+                            background = createDashedBorder()
+                        }
+                        windowManager.addView(regionView, WindowManager.LayoutParams(
+                            0, 0,
+                            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                            PixelFormat.TRANSLUCENT
+                        ))
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val r = regionView?.layoutParams as? WindowManager.LayoutParams
+                        if (r != null) {
+                            r.x = Math.min(startX, event.rawX).toInt()
+                            r.y = Math.min(startY, event.rawY).toInt()
+                            r.width = Math.abs(event.rawX - startX).toInt()
+                            r.height = Math.abs(event.rawY - startY).toInt()
+                            windowManager.updateViewLayout(regionView, r)
+                        }
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val left = Math.min(startX, event.rawX).toInt()
+                        val top = Math.min(startY, event.rawY).toInt()
+                        val right = Math.max(startX, event.rawX).toInt()
+                        val bottom = Math.max(startY, event.rawY).toInt()
+                        regionView?.let { windowManager.removeView(it) }
+                        removePickerOverlay()
+                        floatingBall?.visibility = View.VISIBLE
+
+                        // 弹出输入框让用户输入要找的文字
+                        showFindTextDialog(left, top, right, bottom, existingStep)
+                    }
+                }
+                true
+            }
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        windowManager.addView(overlay, params)
+        pickerOverlay = overlay
+        showPickerToast("拖动框选查找文字的区域")
+    }
+
+    private fun showFindTextDialog(left: Int, top: Int, right: Int, bottom: Int, existingStep: ScriptStep?) {
+        val input = android.widget.EditText(this).apply {
+            hint = "输入要查找的文字"
+            setPadding(32, 16, 32, 16)
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("查找文字")
+            .setView(input)
+            .setPositiveButton("确定") { _, _ ->
+                val text = input.text.toString()
+                if (text.isNotEmpty()) {
+                    val step = existingStep ?: ScriptStep(type = StepType.FIND_TEXT)
+                    step.text = text
+                    step.regionLeft = left
+                    step.regionTop = top
+                    step.regionRight = right
+                    step.regionBottom = bottom
+                    step.useRegion = true
+                    if (existingStep == null) {
+                        editingScript?.steps?.add(step)
+                    }
+                }
+                openEditor()
+            }
+            .setNegativeButton("取消") { _, _ -> openEditor() }
+            .create()
+            .apply {
+                window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+            }
+            .show()
+    }
+
+    private fun showDelayDialog(existingStep: ScriptStep?) {
+        val input = android.widget.EditText(this).apply {
+            hint = "延迟毫秒数（如 500）"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setText("500")
+            setPadding(32, 16, 32, 16)
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("设置延迟")
+            .setView(input)
+            .setPositiveButton("确定") { _, _ ->
+                val ms = input.text.toString().toLongOrNull() ?: 500
+                val step = existingStep ?: ScriptStep(type = StepType.DELAY)
+                step.delay = ms
+                if (existingStep == null) {
+                    editingScript?.steps?.add(step)
+                }
+                editorView?.refreshStepList()
+            }
+            .setNegativeButton("取消", null)
+            .create()
+            .apply {
+                window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+            }
+            .show()
+    }
 
     private fun showRecordingOverlay() {
         // 用 FrameLayout 承载透明触摸层 + 触摸点指示器 + 坐标文本
@@ -338,7 +822,7 @@ class FloatingWindowService : Service() {
                 isExecuting = false
                 scriptExecutor = null
                 hidePanel()
-                floatingBall?.iconText = "▶"
+                floatingBall?.state = FloatingBallView.BallState.IDLE
                 toast("脚本执行完成")
                 scriptManager.markRun(script.id)
             }
@@ -346,11 +830,11 @@ class FloatingWindowService : Service() {
                 isExecuting = false
                 scriptExecutor = null
                 hidePanel()
-                floatingBall?.iconText = "▶"
+                floatingBall?.state = FloatingBallView.BallState.IDLE
                 toast("执行出错: $message")
             }
         })
-        floatingBall?.iconText = "⏸"
+        floatingBall?.state = FloatingBallView.BallState.EXECUTING
         showPanel()
         scriptExecutor?.start()
     }
@@ -365,10 +849,10 @@ class FloatingWindowService : Service() {
         scriptExecutor?.let {
             if (it.isPaused()) {
                 it.resume()
-                floatingBall?.iconText = "⏸"
+                floatingBall?.state = FloatingBallView.BallState.EXECUTING
             } else {
                 it.pause()
-                floatingBall?.iconText = "▶"
+                floatingBall?.state = FloatingBallView.BallState.PAUSED
             }
         }
     }
@@ -378,7 +862,7 @@ class FloatingWindowService : Service() {
         isExecuting = false
         scriptExecutor = null
         hidePanel()
-        floatingBall?.iconText = "▶"
+        floatingBall?.state = FloatingBallView.BallState.IDLE
         toast("已停止执行")
     }
 

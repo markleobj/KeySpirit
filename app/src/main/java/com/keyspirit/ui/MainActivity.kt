@@ -28,6 +28,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: ScriptAdapter
     private lateinit var projectionManager: MediaProjectionManager
+    private lateinit var tvCurrentScript: TextView
 
     companion object {
         private const val REQUEST_SCREEN_CAPTURE = 2001
@@ -40,6 +41,7 @@ class MainActivity : AppCompatActivity() {
         scriptManager = KeySpiritApp.instance.scriptManager
         recyclerView = findViewById(R.id.scriptList)
         recyclerView.layoutManager = LinearLayoutManager(this)
+        tvCurrentScript = findViewById(R.id.tvCurrentScript)
         projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
         // 显示版本号
@@ -106,8 +108,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshScripts() {
+        val currentId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
+        val currentName = com.keyspirit.util.CurrentProjectHolder.currentScriptName
+        tvCurrentScript.text = currentName ?: "未选择"
+
         val scripts = scriptManager.getAllScripts().sortedByDescending { it.updatedAt }
-        adapter = ScriptAdapter(scripts, object : ScriptAdapter.OnItemClickListener {
+        adapter = ScriptAdapter(scripts, currentId, object : ScriptAdapter.OnItemClickListener {
             override fun onPlay(script: Script) {
                 runScript(script)
             }
@@ -116,6 +122,16 @@ class MainActivity : AppCompatActivity() {
             }
             override fun onDelete(script: Script) {
                 scriptManager.deleteScript(script.id)
+                if (com.keyspirit.util.CurrentProjectHolder.currentScriptId == script.id) {
+                    com.keyspirit.util.CurrentProjectHolder.currentScriptId = null
+                    com.keyspirit.util.CurrentProjectHolder.currentScriptName = null
+                }
+                refreshScripts()
+            }
+            override fun onSetCurrent(script: Script) {
+                com.keyspirit.util.CurrentProjectHolder.currentScriptId = script.id
+                com.keyspirit.util.CurrentProjectHolder.currentScriptName = script.name
+                Toast.makeText(this@MainActivity, "已设为当前脚本：${script.name}", Toast.LENGTH_SHORT).show()
                 refreshScripts()
             }
         })
@@ -164,6 +180,7 @@ class MainActivity : AppCompatActivity() {
 
     class ScriptAdapter(
         private val scripts: List<Script>,
+        private val currentId: String?,
         private val listener: OnItemClickListener
     ) : RecyclerView.Adapter<ScriptAdapter.ViewHolder>() {
 
@@ -171,11 +188,13 @@ class MainActivity : AppCompatActivity() {
             fun onPlay(script: Script)
             fun onEdit(script: Script)
             fun onDelete(script: Script)
+            fun onSetCurrent(script: Script)
         }
 
         class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
             val tvName: TextView = view.findViewById(R.id.tvScriptName)
             val tvInfo: TextView = view.findViewById(R.id.tvScriptInfo)
+            val tvCurrentBadge: TextView = view.findViewById(R.id.tvCurrentBadge)
             val btnPlay: TextView = view.findViewById(R.id.btnPlay)
             val btnEdit: TextView = view.findViewById(R.id.btnEdit)
             val btnDelete: TextView = view.findViewById(R.id.btnDelete)
@@ -191,6 +210,9 @@ class MainActivity : AppCompatActivity() {
             val script = scripts[position]
             holder.tvName.text = script.name
 
+            // 显示"当前"标记
+            holder.tvCurrentBadge.visibility = if (script.id == currentId) View.VISIBLE else View.GONE
+
             val dateFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
             val lastRun = if (script.lastRunAt > 0) {
                 "最近运行 ${dateFormat.format(Date(script.lastRunAt))}"
@@ -202,6 +224,11 @@ class MainActivity : AppCompatActivity() {
             holder.btnPlay.setOnClickListener { listener.onPlay(script) }
             holder.btnEdit.setOnClickListener { listener.onEdit(script) }
             holder.btnDelete.setOnClickListener { listener.onDelete(script) }
+            // 长按脚本项设为当前脚本
+            holder.itemView.setOnLongClickListener {
+                listener.onSetCurrent(script)
+                true
+            }
         }
 
         override fun getItemCount(): Int = scripts.size

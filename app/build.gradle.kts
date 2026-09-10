@@ -11,8 +11,8 @@ android {
         applicationId = "com.keyspirit"
         minSdk = 24
         targetSdk = 34
-        versionCode = 25
-        versionName = "1.7.6"
+        versionCode = 27
+        versionName = "1.8.1"
     }
 
     buildTypes {
