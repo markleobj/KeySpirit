@@ -137,6 +137,8 @@ class FloatingWindowService : Service() {
             onRecord = { startRecording() }
             onStopRecord = { stopRecording() }
             onPickCoordinate = { pickCoordinate() }
+            onPickRegion = { pickRegion() }
+            onScreenshot = { takeScreenshot() }
             onExecute = { showScriptList() }
             onPause = { pauseExecution() }
             onStopExecute = { stopExecution() }
@@ -309,6 +311,32 @@ class FloatingWindowService : Service() {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         startActivity(intent)
+    }
+
+    private fun pickRegion() {
+        hidePanel()
+        val intent = Intent().apply {
+            setClassName("com.keyspirit", "com.keyspirit.ui.RegionPickerActivity")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+    }
+
+    private fun takeScreenshot() {
+        hidePanel()
+        val bitmap = com.keyspirit.util.ScreenCaptureHolder.latestBitmap
+        if (bitmap == null) {
+            // 如果截屏服务未运行，尝试启动
+            toast("截屏服务未启动，请先在脚本中使用找图/找文字功能以激活截屏")
+            return
+        }
+        // 保存到应用目录
+        val path = com.keyspirit.util.ScreenshotUtils.saveToAppDir(this, bitmap)
+        if (path != null) {
+            toast("截图已保存: ${path.substringAfterLast('/')}")
+        } else {
+            toast("截图保存失败")
+        }
     }
 
     // ============ 工具方法 ============

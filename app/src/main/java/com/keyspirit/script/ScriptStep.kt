@@ -23,6 +23,12 @@ data class ScriptStep(
     var findTimeout: Long = 5000,
     // 找文字相关
     var text: String = "",
+    // 区域查找（用于找图/找文字的限定区域）
+    var regionLeft: Int = 0,
+    var regionTop: Int = 0,
+    var regionRight: Int = 0,
+    var regionBottom: Int = 0,
+    var useRegion: Boolean = false,
     // 循环相关
     var loopCount: Int = 1,
     var loopStartIndex: Int = 0,
@@ -38,8 +44,14 @@ data class ScriptStep(
             StepType.SWIPE -> "($x1,$y1) → ($x2,$y2) ${duration}ms"
             StepType.LONG_PRESS -> "长按 ($x, $y) ${duration}ms"
             StepType.DELAY -> if (randomDelay > 0) "${delay}~${delay + randomDelay}ms" else "${delay}ms"
-            StepType.FIND_IMAGE -> "图片: $imagePath 相似度: $similarity"
-            StepType.FIND_TEXT -> "文字: \"$text\""
+            StepType.FIND_IMAGE -> {
+                val regionStr = if (useRegion) " [区域:($regionLeft,$regionTop)-($regionRight,$regionBottom)]" else ""
+                "图片: ${imagePath.substringAfterLast('/')} 相似度: $similarity$regionStr"
+            }
+            StepType.FIND_TEXT -> {
+                val regionStr = if (useRegion) " [区域:($regionLeft,$regionTop)-($regionRight,$regionBottom)]" else ""
+                "文字: \"$text\"$regionStr"
+            }
             StepType.LOOP -> "重复 $loopCount 次，步骤 ${loopStartIndex + 1}-${loopEndIndex + 1}"
         }
     }

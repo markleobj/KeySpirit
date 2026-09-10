@@ -223,7 +223,10 @@ class ScriptExecutor(
 
     private fun findAndClickImage(step: ScriptStep): Boolean {
         val matcher = ImageMatcher.instance ?: return false
-        val result = matcher.findImage(step.imagePath, step.similarity, step.findTimeout)
+        val region = if (step.useRegion) {
+            android.graphics.Rect(step.regionLeft, step.regionTop, step.regionRight, step.regionBottom)
+        } else null
+        val result = matcher.findImage(step.imagePath, step.similarity, step.findTimeout, region)
         if (result != null) {
             val service = AutoAccessibilityService.instance ?: return false
             performClick(service, result.x, result.y)
@@ -234,7 +237,10 @@ class ScriptExecutor(
 
     private fun findAndClickText(step: ScriptStep): Boolean {
         val ocr = OcrHelper.instance ?: return false
-        val result = ocr.findText(step.text, step.findTimeout)
+        val region = if (step.useRegion) {
+            android.graphics.Rect(step.regionLeft, step.regionTop, step.regionRight, step.regionBottom)
+        } else null
+        val result = ocr.findText(step.text, step.findTimeout, region)
         if (result != null) {
             val service = AutoAccessibilityService.instance ?: return false
             performClick(service, result.x, result.y)

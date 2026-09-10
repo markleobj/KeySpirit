@@ -2,6 +2,7 @@ package com.keyspirit.util
 
 import android.graphics.Bitmap
 import android.graphics.Point
+import android.graphics.Rect
 import android.util.Log
 
 class ImageMatcher private constructor() {
@@ -21,16 +22,33 @@ class ImageMatcher private constructor() {
      * @param imagePath 模板图片路径
      * @param similarity 相似度阈值 0~1
      * @param timeout 超时时间 ms
+     * @param region 限定查找区域（null 表示全屏）
      * @return 找到的中心点坐标，未找到返回 null
      */
-    fun findImage(imagePath: String, similarity: Double, timeout: Long): Point? {
-        val screenBitmap = captureScreen() ?: return null
+    fun findImage(imagePath: String, similarity: Double, timeout: Long, region: Rect? = null): Point? {
         val templateBitmap = loadTemplate(imagePath) ?: return null
 
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < timeout) {
-            val result = matchTemplate(screenBitmap, templateBitmap, similarity)
-            if (result != null) return result
+            val screenBitmap = captureScreen() ?: continue
+            // 如果指定了区域，裁剪屏幕位图
+            val (searchBitmap, offsetX, offsetY) = if (region != null) {
+                val left = region.left.coerceIn(0, screenBitmap.width)
+                val top = region.top.coerceIn(0, screenBitmap.height)
+                val right = region.right.coerceIn(left, screenBitmap.width)
+                val bottom = region.bottom.coerceIn(top, screenBitmap.height)
+                if (right - left < 10 || bottom - top < 10) {
+                    Triple(screenBitmap, 0, 0)
+                } else {
+                    Triple(Bitmap.createBitmap(screenBitmap, left, top, right - left, bottom - top), left, top)
+                }
+            } else {
+                Triple(screenBitmap, 0, 0)
+            }
+            val result = matchTemplate(searchBitmap, templateBitmap, similarity)
+            if (result != null) {
+                return Point(result.x + offsetX, result.y + offsetY)
+            }
             Thread.sleep(200)
         }
         return null

@@ -26,6 +26,7 @@ class ScriptEditActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_SCRIPT_ID = "script_id"
+        private const val REQUEST_REGION = 1001
     }
 
     private lateinit var scriptManager: ScriptManager
@@ -160,9 +161,11 @@ class ScriptEditActivity : AppCompatActivity() {
             StepType.FIND_IMAGE -> {
                 inputs["imagePath"] = addInput(layout, "图片路径", step.imagePath)
                 inputs["similarity"] = addInput(layout, "相似度(0-1)", step.similarity.toString())
+                addRegionInputs(layout, step, inputs)
             }
             StepType.FIND_TEXT -> {
                 inputs["text"] = addInput(layout, "要查找的文字", step.text)
+                addRegionInputs(layout, step, inputs)
             }
             StepType.LOOP -> {
                 inputs["loopCount"] = addInput(layout, "循环次数", step.loopCount.toString())
@@ -202,6 +205,10 @@ class ScriptEditActivity : AppCompatActivity() {
         inputs["loopCount"]?.let { step.loopCount = it.text.toString().toInt() }
         inputs["loopStartIndex"]?.let { step.loopStartIndex = it.text.toString().toInt() }
         inputs["loopEndIndex"]?.let { step.loopEndIndex = it.text.toString().toInt() }
+        inputs["regionLeft"]?.let { step.regionLeft = it.text.toString().toInt() }
+        inputs["regionTop"]?.let { step.regionTop = it.text.toString().toInt() }
+        inputs["regionRight"]?.let { step.regionRight = it.text.toString().toInt() }
+        inputs["regionBottom"]?.let { step.regionBottom = it.text.toString().toInt() }
     }
 
     private fun addInput(parent: LinearLayout, label: String, value: String): EditText {
@@ -218,6 +225,74 @@ class ScriptEditActivity : AppCompatActivity() {
         }
         parent.addView(et)
         return et
+    }
+
+    private var currentEditingStep: ScriptStep? = null
+
+    private fun addRegionInputs(parent: LinearLayout, step: ScriptStep, inputs: MutableMap<String, EditText>) {
+        // 限定区域开关
+        val checkTv = TextView(this).apply {
+            text = "限定查找区域"
+            setPadding(0, 16, 0, 4)
+            setTextColor(getColor(R.color.gray))
+            textSize = 13f
+        }
+        parent.addView(checkTv)
+
+        val switch = android.widget.Switch(this).apply {
+            isChecked = step.useRegion
+            setOnCheckedChangeListener { _, checked ->
+                step.useRegion = checked
+            }
+        }
+        parent.addView(switch)
+
+        // 区域坐标输入
+        inputs["regionLeft"] = addInput(parent, "区域左 X", step.regionLeft.toString())
+        inputs["regionTop"] = addInput(parent, "区域上 Y", step.regionTop.toString())
+        inputs["regionRight"] = addInput(parent, "区域右 X", step.regionRight.toString())
+        inputs["regionBottom"] = addInput(parent, "区域下 Y", step.regionBottom.toString())
+
+        // 选取区域按钮
+        val pickBtn = TextView(this).apply {
+            text = "📐 框选屏幕区域"
+            setTextColor(getColor(R.color.white))
+            setBackgroundColor(getColor(R.color.primary))
+            setPadding(24, 16, 24, 16)
+            textSize = 14f
+            setOnClickListener {
+                currentEditingStep = step
+                val intent = Intent(this@ScriptEditActivity, RegionPickerActivity::class.java)
+                startActivityForResult(intent, REQUEST_REGION)
+            }
+        }
+        val params = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = 16 }
+        parent.addView(pickBtn, params)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_REGION && resultCode == RESULT_OK) {
+            data?.let {
+                val left = it.getIntExtra(RegionPickerActivity.EXTRA_LEFT, 0)
+                val top = it.getIntExtra(RegionPickerActivity.EXTRA_TOP, 0)
+                val right = it.getIntExtra(RegionPickerActivity.EXTRA_RIGHT, 0)
+                val bottom = it.getIntExtra(RegionPickerActivity.EXTRA_BOTTOM, 0)
+                currentEditingStep?.let { step ->
+                    step.useRegion = true
+                    step.regionLeft = left
+                    step.regionTop = top
+                    step.regionRight = right
+                    step.regionBottom = bottom
+                }
+                refreshStepList()
+                Toast.makeText(this, "区域已设置: ($left,$top)-($right,$bottom)", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun saveScript() {
