@@ -58,6 +58,18 @@ class ScreenCaptureService : Service() {
     private val imageLock = Object()
     private var latestImage: Image? = null
 
+    // 诊断信息
+    @Volatile
+    private var lastError: String = "未尝试截屏"
+    @Volatile
+    private var lastCaptureTime: Long = 0
+    @Volatile
+    private var lastCaptureSuccess: Boolean = false
+    @Volatile
+    private var frameReceivedCount: Int = 0
+    @Volatile
+    private var initDone: Boolean = false
+
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
             Log.w(TAG, "MediaProjection 已被系统停止")
@@ -73,10 +85,14 @@ class ScreenCaptureService : Service() {
         try {
             val image = reader.acquireLatestImage()
             if (image != null) {
+                frameReceivedCount++
                 synchronized(imageLock) {
                     latestImage?.close()
                     latestImage = image
                     imageLock.notifyAll()
+                }
+                if (frameReceivedCount <= 3) {
+                    Log.d(TAG, "收到第 $frameReceivedCount 帧: ${image.width}x${image.height}")
                 }
             }
         } catch (e: Exception) {
@@ -161,6 +177,7 @@ class ScreenCaptureService : Service() {
         }
 
         Log.d(TAG, "屏幕尺寸: ${screenWidth}x${screenHeight}, density=$screenDensity")
+        lastError = "屏幕尺寸: ${screenWidth}x${screenHeight}, density=$screenDensity"
 
         // 创建 ImageReader 和 VirtualDisplay
         imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 3)
@@ -173,6 +190,7 @@ class ScreenCaptureService : Service() {
             imageReader!!.surface, null, mainHandler
         )
 
+        initDone = true
         Log.d(TAG, "MediaProjection 初始化成功，VirtualDisplay 已创建，等待首帧...")
     }
 
@@ -182,18 +200,26 @@ class ScreenCaptureService : Service() {
      * 不丢弃、不等待新帧，所以静态屏幕也能拿到截图。
      */
     fun captureScreen(): Bitmap? {
+        lastCaptureTime = System.currentTimeMillis()
         if (mediaProjection == null) {
-            Log.e(TAG, "截屏失败: mediaProjection 为 null（请重新授权截屏权限）")
+            lastError = "失败: mediaProjection 为 null（截屏权限已失效，请重新授权）"
+            lastCaptureSuccess = false
+            Log.e(TAG, "截屏失败: mediaProjection 为 null")
+            return null
+        }
+        if (!initDone) {
+            lastError = "失败: 截屏服务尚未初始化完成"
+            lastCaptureSuccess = false
             return null
         }
         if (screenWidth == 0 || screenHeight == 0) {
-            Log.e(TAG, "截屏失败: 屏幕尺寸为 0")
+            lastError = "失败: 屏幕尺寸为 0"
+            lastCaptureSuccess = false
             return null
         }
 
         var image: Image? = null
         synchronized(imageLock) {
-            // 如果还没有任何帧，等待首帧（最长 3 秒）
             if (latestImage == null) {
                 try {
                     val deadline = System.currentTimeMillis() + 3000
@@ -209,6 +235,8 @@ class ScreenCaptureService : Service() {
 
         val capturedImage = image
         if (capturedImage == null) {
+            lastError = "失败: 3秒内未收到任何图像帧（已收到 $frameReceivedCount 帧，VirtualDisplay可能未正常工作）"
+            lastCaptureSuccess = false
             Log.e(TAG, "截屏失败: 3秒内未获取到任何图像帧")
             return null
         }
@@ -217,17 +245,40 @@ class ScreenCaptureService : Service() {
             Log.d(TAG, "截取图像: ${capturedImage.width}x${capturedImage.height} (期望 ${screenWidth}x${screenHeight})")
             val bitmap = imageToBitmap(capturedImage)
             if (bitmap == null) {
+                lastError = "失败: Image 转 Bitmap 失败"
+                lastCaptureSuccess = false
                 Log.e(TAG, "Image 转 Bitmap 失败")
             } else {
+                lastError = "成功: ${bitmap.width}x${bitmap.height}"
+                lastCaptureSuccess = true
                 Log.d(TAG, "截屏成功: ${bitmap.width}x${bitmap.height}")
             }
             bitmap
         } catch (e: Exception) {
+            lastError = "失败: 截屏异常 ${e.message}"
+            lastCaptureSuccess = false
             Log.e(TAG, "截屏异常", e)
             null
         }
-        // 注意：这里不 close image，保留 latestImage 供下次使用。
-        // 当新帧到来时，OnImageAvailableListener 会自动 close 旧的 latestImage。
+    }
+
+    /**
+     * 获取诊断信息字符串，供 App 内展示
+     */
+    fun getDiagnosticInfo(): String {
+        val sb = StringBuilder()
+        sb.appendLine("=== 截屏服务诊断 ===")
+        sb.appendLine("服务运行: ${instance != null}")
+        sb.appendLine("MediaProjection有效: ${mediaProjection != null}")
+        sb.appendLine("初始化完成: $initDone")
+        sb.appendLine("屏幕尺寸: ${screenWidth}x${screenHeight}, density=$screenDensity")
+        sb.appendLine("ImageReader: ${imageReader != null}")
+        sb.appendLine("VirtualDisplay: ${virtualDisplay != null}")
+        sb.appendLine("已收到帧数: $frameReceivedCount")
+        sb.appendLine("最新帧: ${latestImage != null}")
+        sb.appendLine("最近截屏: ${if (lastCaptureTime > 0) java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(lastCaptureTime)) else "无"}")
+        sb.appendLine("最近结果: $lastError")
+        return sb.toString()
     }
 
     private fun imageToBitmap(image: Image): Bitmap? {

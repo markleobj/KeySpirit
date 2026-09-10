@@ -647,11 +647,7 @@ class FloatingWindowService : Service() {
         hidePanel()
         val service = com.keyspirit.service.ScreenCaptureService.instance
         if (service == null) {
-            toast("截屏服务未启动，请先在 App 首页授权截屏权限")
-            return
-        }
-        if (!com.keyspirit.service.ScreenCaptureService.isProjectionActive()) {
-            toast("截屏权限已失效，请回到 App 首页重新授权")
+            showDiagnosticDialog("截屏服务未启动，请先在 App 首页授权截屏权限")
             return
         }
         // 在后台线程截屏（captureScreen 是同步阻塞方法）
@@ -659,11 +655,7 @@ class FloatingWindowService : Service() {
             val bitmap = service.captureScreen()
             if (bitmap == null) {
                 handler.post {
-                    if (!com.keyspirit.service.ScreenCaptureService.isProjectionActive()) {
-                        toast("截屏权限已失效，请回到 App 首页重新授权")
-                    } else {
-                        toast("截屏失败，请重试")
-                    }
+                    showDiagnosticDialog("截屏失败\n\n${service.getDiagnosticInfo()}")
                 }
                 return@Thread
             }
@@ -721,6 +713,23 @@ class FloatingWindowService : Service() {
     private fun toast(msg: String) {
         handler.post {
             android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * 弹出诊断信息对话框，让用户直接看到截屏失败的具体原因
+     */
+    private fun showDiagnosticDialog(message: String) {
+        handler.post {
+            android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+                .setTitle("截屏诊断")
+                .setMessage(message)
+                .setPositiveButton("知道了", null)
+                .create()
+                .apply {
+                    window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                }
+                .show()
         }
     }
 
