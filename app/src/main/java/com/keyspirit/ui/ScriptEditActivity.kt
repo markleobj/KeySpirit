@@ -320,6 +320,7 @@ class ScriptEditActivity : AppCompatActivity() {
         // 启动悬浮窗服务并触发坐标选取
         val intent = Intent(this, com.keyspirit.service.FloatingWindowService::class.java).apply {
             action = com.keyspirit.service.FloatingWindowService.ACTION_PICK_COORDINATE
+            putExtra("fromEditor", true)
         }
         startService(intent)
         // 退到后台，让用户看到目标 App
@@ -368,6 +369,7 @@ class ScriptEditActivity : AppCompatActivity() {
                 com.keyspirit.util.RegionResultHolder.hasNewResult = false
                 val intent = Intent(this@ScriptEditActivity, com.keyspirit.service.FloatingWindowService::class.java).apply {
                     action = com.keyspirit.service.FloatingWindowService.ACTION_PICK_REGION
+                    putExtra("fromEditor", true)
                 }
                 startService(intent)
                 moveTaskToBack(true)

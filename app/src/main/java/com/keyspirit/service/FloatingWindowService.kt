@@ -89,9 +89,11 @@ class FloatingWindowService : Service() {
                 startExecution(script)
             }
             ACTION_PICK_COORDINATE -> {
+                pickerFromEditor = intent.getBooleanExtra("fromEditor", false)
                 pickCoordinate()
             }
             ACTION_PICK_REGION -> {
+                pickerFromEditor = intent.getBooleanExtra("fromEditor", false)
                 pickRegion()
             }
             ACTION_HIDE -> {
@@ -331,6 +333,8 @@ class FloatingWindowService : Service() {
         showCoordinateOverlay()
     }
 
+    private var pickerFromEditor = false
+
     private fun showCoordinateOverlay() {
         // 先隐藏悬浮球，避免遮挡
         floatingBall?.visibility = View.GONE
@@ -348,12 +352,17 @@ class FloatingWindowService : Service() {
                     MotionEvent.ACTION_UP -> {
                         val x = event.rawX.toInt()
                         val y = event.rawY.toInt()
-                        // 保存坐标结果
-                        com.keyspirit.util.CoordinateResultHolder.x = x
-                        com.keyspirit.util.CoordinateResultHolder.y = y
-                        com.keyspirit.util.CoordinateResultHolder.hasResult = true
                         removePickerOverlay()
-                        toast("已选取坐标: ($x, $y)")
+                        if (pickerFromEditor) {
+                            // 编辑器流程：保存坐标，编辑器 onResume 读取
+                            com.keyspirit.util.CoordinateResultHolder.x = x
+                            com.keyspirit.util.CoordinateResultHolder.y = y
+                            com.keyspirit.util.CoordinateResultHolder.hasResult = true
+                            toast("坐标已选取: ($x, $y)")
+                        } else {
+                            // 悬浮窗流程：显示操作菜单
+                            showCoordinateActionMenu(x, y)
+                        }
                     }
                 }
                 true
@@ -394,9 +403,9 @@ class FloatingWindowService : Service() {
                     MotionEvent.ACTION_DOWN -> {
                         startX = event.rawX
                         startY = event.rawY
-                        // 创建选区框
+                        // 创建虚线边框选区框
                         regionView = View(this@FloatingWindowService).apply {
-                            setBackgroundColor(0x440066FF.toInt())
+                            background = createDashedBorder()
                         }
                         val rParams = WindowManager.LayoutParams(
                             0, 0,
@@ -432,11 +441,16 @@ class FloatingWindowService : Service() {
                         val bottom = maxOf(startY, endY).toInt()
                         // 移除选区框
                         regionView?.let { windowManager.removeView(it) }
-                        // 保存结果
-                        com.keyspirit.util.RegionResultHolder.region = intArrayOf(left, top, right, bottom)
-                        com.keyspirit.util.RegionResultHolder.hasNewResult = true
                         removePickerOverlay()
-                        toast("已选取区域: [$left, $top, $right, $bottom]")
+                        if (pickerFromEditor) {
+                            // 编辑器流程：保存区域，编辑器 onResume 读取
+                            com.keyspirit.util.RegionResultHolder.region = intArrayOf(left, top, right, bottom)
+                            com.keyspirit.util.RegionResultHolder.hasNewResult = true
+                            toast("区域已选取: [$left,$top,$right,$bottom]")
+                        } else {
+                            // 悬浮窗流程：显示操作菜单
+                            showRegionActionMenu(left, top, right, bottom)
+                        }
                     }
                 }
                 true
@@ -453,6 +467,119 @@ class FloatingWindowService : Service() {
         windowManager.addView(overlay, params)
         pickerOverlay = overlay
         showPickerToast("拖动选择区域")
+    }
+
+    /**
+     * 创建虚线边框 Drawable
+     */
+    private fun createDashedBorder(): android.graphics.drawable.Drawable {
+        val sWidth = 6f
+        val dWidth = 20f
+        val dGap = 12f
+        val paint = android.graphics.Paint().apply {
+            color = android.graphics.Color.parseColor("#00BFFF")
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = sWidth
+            pathEffect = android.graphics.DashPathEffect(floatArrayOf(dWidth, dGap), 0f)
+        }
+        return object : android.graphics.drawable.Drawable() {
+            override fun draw(canvas: android.graphics.Canvas) {
+                val rect = android.graphics.RectF(bounds)
+                canvas.drawRect(rect, paint)
+            }
+            override fun setAlpha(alpha: Int) {}
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
+            override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+        }
+    }
+
+    /**
+     * 区域选取后的操作菜单
+     */
+    private fun showRegionActionMenu(left: Int, top: Int, right: Int, bottom: Int) {
+        val options = arrayOf("在此区域找图", "在此区域找文字", "仅保存区域")
+        val dialog = android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("选择操作")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        addStepToCurrentScript(com.keyspirit.script.ScriptStep(
+                            type = com.keyspirit.script.StepType.FIND_IMAGE,
+                            useRegion = true,
+                            regionLeft = left, regionTop = top,
+                            regionRight = right, regionBottom = bottom
+                        ))
+                        toast("已添加：在区域内找图")
+                    }
+                    1 -> {
+                        addStepToCurrentScript(com.keyspirit.script.ScriptStep(
+                            type = com.keyspirit.script.StepType.FIND_TEXT,
+                            useRegion = true,
+                            regionLeft = left, regionTop = top,
+                            regionRight = right, regionBottom = bottom
+                        ))
+                        toast("已添加：在区域内找文字")
+                    }
+                    2 -> {
+                        toast("区域已保存: [$left,$top,$right,$bottom]")
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .create()
+        dialog.window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+        dialog.show()
+    }
+
+    /**
+     * 坐标选取后的操作菜单
+     */
+    private fun showCoordinateActionMenu(x: Int, y: Int) {
+        val options = arrayOf("点击此处", "长按此处", "保存坐标")
+        val dialog = android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("坐标 ($x, $y) - 选择操作")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        addStepToCurrentScript(com.keyspirit.script.ScriptStep(
+                            type = com.keyspirit.script.StepType.CLICK,
+                            x = x, y = y
+                        ))
+                        toast("已添加：点击 ($x, $y)")
+                    }
+                    1 -> {
+                        addStepToCurrentScript(com.keyspirit.script.ScriptStep(
+                            type = com.keyspirit.script.StepType.LONG_PRESS,
+                            x = x, y = y, duration = 1000
+                        ))
+                        toast("已添加：长按 ($x, $y)")
+                    }
+                    2 -> {
+                        toast("坐标已保存: ($x, $y)")
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .create()
+        dialog.window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+        dialog.show()
+    }
+
+    /**
+     * 添加步骤到当前脚本（如果没有当前脚本则创建默认项目）
+     */
+    private fun addStepToCurrentScript(step: com.keyspirit.script.ScriptStep) {
+        var scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
+        if (scriptId == null) {
+            val defaultScript = com.keyspirit.script.Script(name = "默认项目")
+            scriptManager.saveScript(defaultScript)
+            scriptId = defaultScript.id
+            com.keyspirit.util.CurrentProjectHolder.currentScriptId = scriptId
+            com.keyspirit.util.CurrentProjectHolder.currentScriptName = defaultScript.name
+        }
+        val script = scriptManager.getScript(scriptId) ?: return
+        script.steps.add(step)
+        scriptManager.saveScript(script)
     }
 
     private fun removePickerOverlay() {
@@ -503,11 +630,16 @@ class FloatingWindowService : Service() {
             toast("截屏服务未启动，请先在 App 首页授权截屏权限")
             return
         }
-        val scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
-        val scriptName = com.keyspirit.util.CurrentProjectHolder.currentScriptName
+        // 如果没有当前项目，自动创建一个默认项目
+        var scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
+        var scriptName = com.keyspirit.util.CurrentProjectHolder.currentScriptName
         if (scriptId == null) {
-            toast("请先打开或运行一个脚本项目，再截图")
-            return
+            val defaultScript = com.keyspirit.script.Script(name = "默认项目")
+            scriptManager.saveScript(defaultScript)
+            scriptId = defaultScript.id
+            scriptName = defaultScript.name
+            com.keyspirit.util.CurrentProjectHolder.currentScriptId = scriptId
+            com.keyspirit.util.CurrentProjectHolder.currentScriptName = scriptName
         }
         // 保存到当前项目的截图目录
         val path = com.keyspirit.util.ScreenshotUtils.saveToProject(this, bitmap, scriptId)
