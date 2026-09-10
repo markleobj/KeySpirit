@@ -650,11 +650,21 @@ class FloatingWindowService : Service() {
             toast("截屏服务未启动，请先在 App 首页授权截屏权限")
             return
         }
+        if (!com.keyspirit.service.ScreenCaptureService.isProjectionActive()) {
+            toast("截屏权限已失效，请回到 App 首页重新授权")
+            return
+        }
         // 在后台线程截屏（captureScreen 是同步阻塞方法）
         Thread {
             val bitmap = service.captureScreen()
             if (bitmap == null) {
-                handler.post { toast("截屏失败，请重试") }
+                handler.post {
+                    if (!com.keyspirit.service.ScreenCaptureService.isProjectionActive()) {
+                        toast("截屏权限已失效，请回到 App 首页重新授权")
+                    } else {
+                        toast("截屏失败，请重试")
+                    }
+                }
                 return@Thread
             }
             // 如果没有当前项目，自动创建一个默认项目
