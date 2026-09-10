@@ -14,7 +14,6 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
 import android.util.DisplayMetrics
 import android.util.Log
@@ -22,7 +21,6 @@ import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.keyspirit.KeySpiritApp
 import com.keyspirit.R
-import com.keyspirit.util.ScreenCaptureHolder
 import java.nio.ByteBuffer
 
 import android.os.HandlerThread
@@ -80,9 +78,9 @@ class ScreenCaptureService : Service() {
 
         if (resultCode != 0 && data != null) {
             try {
-                startCapture(resultCode, data)
+                initMediaProjection(resultCode, data)
             } catch (e: Exception) {
-                Log.e(TAG, "startCapture 失败", e)
+                Log.e(TAG, "initMediaProjection 失败", e)
                 stopSelf()
             }
         }
@@ -99,79 +97,74 @@ class ScreenCaptureService : Service() {
             .build()
     }
 
-    private fun startCapture(resultCode: Int, data: Intent) {
-        try {
-            // 1. 获取 MediaProjection
-            val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            mediaProjection = manager.getMediaProjection(resultCode, data)
-            Log.d(TAG, "MediaProjection 获取成功")
-        } catch (e: Exception) {
-            Log.e(TAG, "获取 MediaProjection 失败", e)
-            throw e
-        }
+    /**
+     * 初始化 MediaProjection（只做一次，保存对象供按需截屏使用）
+     */
+    private fun initMediaProjection(resultCode: Int, data: Intent) {
+        val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        mediaProjection = manager.getMediaProjection(resultCode, data)
 
-        try {
-            // 2. 获取屏幕尺寸
-            val metrics = DisplayMetrics()
-            val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                wm.currentWindowMetrics.bounds.let {
-                    screenWidth = it.width()
-                    screenHeight = it.height()
-                }
-                @Suppress("DEPRECATION")
-                wm.defaultDisplay.getRealMetrics(metrics)
-            } else {
-                @Suppress("DEPRECATION")
-                wm.defaultDisplay.getRealMetrics(metrics)
-                screenWidth = metrics.widthPixels
-                screenHeight = metrics.heightPixels
+        val metrics = DisplayMetrics()
+        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            wm.currentWindowMetrics.bounds.let {
+                screenWidth = it.width()
+                screenHeight = it.height()
             }
-            screenDensity = metrics.densityDpi
-            if (screenDensity == 0) screenDensity = Resources.getSystem().displayMetrics.densityDpi
-            Log.d(TAG, "屏幕尺寸: ${screenWidth}x${screenHeight}, density=$screenDensity")
-        } catch (e: Exception) {
-            Log.e(TAG, "获取屏幕尺寸失败", e)
-            throw e
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealMetrics(metrics)
+        } else {
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealMetrics(metrics)
+            screenWidth = metrics.widthPixels
+            screenHeight = metrics.heightPixels
         }
+        screenDensity = metrics.densityDpi
+        if (screenDensity == 0) screenDensity = Resources.getSystem().displayMetrics.densityDpi
 
-        try {
-            // 3. 创建 ImageReader，使用后台线程处理图像
-            handlerThread = HandlerThread("ScreenCapture").apply { start() }
-            imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2)
-            imageReader?.setOnImageAvailableListener({ reader ->
-                try {
-                    val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    val bitmap = imageToBitmap(image)
-                    image.close()
-                    bitmap?.let {
-                        ScreenCaptureHolder.latestBitmap = it
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "处理图像帧失败", e)
-                }
-            }, Handler(handlerThread!!.looper))
-            Log.d(TAG, "ImageReader 创建成功")
-        } catch (e: Exception) {
-            Log.e(TAG, "创建 ImageReader 失败", e)
-            throw e
-        }
+        handlerThread = HandlerThread("ScreenCapture").apply { start() }
+        Log.d(TAG, "MediaProjection 初始化成功: ${screenWidth}x${screenHeight}")
+    }
 
-        try {
-            // 4. 创建 VirtualDisplay
-            virtualDisplay = mediaProjection?.createVirtualDisplay(
+    /**
+     * 按需截取一帧屏幕（同步方法，在调用线程执行）
+     */
+    fun captureScreen(): Bitmap? {
+        val projection = mediaProjection ?: return null
+        if (screenWidth == 0 || screenHeight == 0) return null
+
+        var reader: ImageReader? = null
+        var vDisplay: VirtualDisplay? = null
+        return try {
+            reader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2)
+            vDisplay = projection.createVirtualDisplay(
                 "KeySpiritCapture",
                 screenWidth, screenHeight, screenDensity,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader?.surface, null, null
+                reader.surface, null, null
             )
-            Log.d(TAG, "VirtualDisplay 创建成功")
+            // 等待一帧图像
+            var image: Image? = null
+            val deadline = System.currentTimeMillis() + 2000
+            while (System.currentTimeMillis() < deadline) {
+                image = reader.acquireLatestImage()
+                if (image != null) break
+                Thread.sleep(16)
+            }
+            if (image == null) {
+                Log.e(TAG, "截屏超时，未获取到图像")
+                return null
+            }
+            val bitmap = imageToBitmap(image)
+            image.close()
+            bitmap
         } catch (e: Exception) {
-            Log.e(TAG, "创建 VirtualDisplay 失败", e)
-            throw e
+            Log.e(TAG, "截屏失败", e)
+            null
+        } finally {
+            vDisplay?.release()
+            reader?.close()
         }
-
-        Log.d(TAG, "截屏服务已启动: ${screenWidth}x${screenHeight}")
     }
 
     private fun imageToBitmap(image: Image): Bitmap? {
@@ -204,10 +197,6 @@ class ScreenCaptureService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         instance = null
-        virtualDisplay?.release()
-        virtualDisplay = null
-        imageReader?.close()
-        imageReader = null
         mediaProjection?.stop()
         mediaProjection = null
         handlerThread?.quitSafely()

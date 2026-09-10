@@ -55,8 +55,8 @@ class ImageMatcher private constructor() {
     }
 
     private fun captureScreen(): Bitmap? {
-        // 通过 ScreenCaptureService 截屏
-        return ScreenCaptureHolder.latestBitmap
+        // 通过 ScreenCaptureService 按需截屏
+        return com.keyspirit.service.ScreenCaptureService.instance?.captureScreen()
     }
 
     private fun loadTemplate(path: String): Bitmap? {

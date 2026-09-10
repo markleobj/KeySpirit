@@ -231,13 +231,21 @@ class FloatingWindowService : Service() {
                 true
             }
         }
-        val params = createOverlayParams(
+        val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT
-        ).apply {
-            flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-        }
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
         windowManager.addView(recordingOverlay, params)
+        // 把悬浮球提到最上层，确保可以点击停止
+        floatingBall?.let { ball ->
+            windowManager.removeView(ball)
+            windowManager.addView(ball, ball.layoutParams)
+        }
     }
 
     private fun hideRecordingOverlay() {
@@ -373,7 +381,9 @@ class FloatingWindowService : Service() {
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         )
         windowManager.addView(overlay, params)
@@ -410,7 +420,9 @@ class FloatingWindowService : Service() {
                         val rParams = WindowManager.LayoutParams(
                             0, 0,
                             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                             PixelFormat.TRANSLUCENT
                         )
                         windowManager.addView(regionView, rParams)
@@ -461,7 +473,9 @@ class FloatingWindowService : Service() {
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         )
         windowManager.addView(overlay, params)
@@ -625,29 +639,38 @@ class FloatingWindowService : Service() {
 
     private fun takeScreenshot() {
         hidePanel()
-        val bitmap = com.keyspirit.util.ScreenCaptureHolder.latestBitmap
-        if (bitmap == null) {
+        val service = com.keyspirit.service.ScreenCaptureService.instance
+        if (service == null) {
             toast("截屏服务未启动，请先在 App 首页授权截屏权限")
             return
         }
-        // 如果没有当前项目，自动创建一个默认项目
-        var scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
-        var scriptName = com.keyspirit.util.CurrentProjectHolder.currentScriptName
-        if (scriptId == null) {
-            val defaultScript = com.keyspirit.script.Script(name = "默认项目")
-            scriptManager.saveScript(defaultScript)
-            scriptId = defaultScript.id
-            scriptName = defaultScript.name
-            com.keyspirit.util.CurrentProjectHolder.currentScriptId = scriptId
-            com.keyspirit.util.CurrentProjectHolder.currentScriptName = scriptName
-        }
-        // 保存到当前项目的截图目录
-        val path = com.keyspirit.util.ScreenshotUtils.saveToProject(this, bitmap, scriptId)
-        if (path != null) {
-            toast("已保存到【$scriptName】项目: ${path.substringAfterLast('/')}")
-        } else {
-            toast("截图保存失败")
-        }
+        // 在后台线程截屏（captureScreen 是同步阻塞方法）
+        Thread {
+            val bitmap = service.captureScreen()
+            if (bitmap == null) {
+                handler.post { toast("截屏失败，请重试") }
+                return@Thread
+            }
+            // 如果没有当前项目，自动创建一个默认项目
+            var scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
+            var scriptName = com.keyspirit.util.CurrentProjectHolder.currentScriptName
+            if (scriptId == null) {
+                val defaultScript = com.keyspirit.script.Script(name = "默认项目")
+                scriptManager.saveScript(defaultScript)
+                scriptId = defaultScript.id
+                scriptName = defaultScript.name
+                com.keyspirit.util.CurrentProjectHolder.currentScriptId = scriptId
+                com.keyspirit.util.CurrentProjectHolder.currentScriptName = scriptName
+            }
+            val path = com.keyspirit.util.ScreenshotUtils.saveToProject(this, bitmap, scriptId)
+            handler.post {
+                if (path != null) {
+                    toast("已保存到【$scriptName】: ${path.substringAfterLast('/')}")
+                } else {
+                    toast("截图保存失败")
+                }
+            }
+        }.start()
     }
 
     // ============ 工具方法 ============

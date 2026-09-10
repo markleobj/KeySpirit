@@ -30,7 +30,7 @@ class OcrHelper private constructor() {
     fun findText(targetText: String, timeout: Long, region: Rect? = null): Point? {
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < timeout) {
-            val bitmap = ScreenCaptureHolder.latestBitmap
+            val bitmap = com.keyspirit.service.ScreenCaptureService.instance?.captureScreen()
             if (bitmap == null) {
                 Thread.sleep(200)
                 continue
