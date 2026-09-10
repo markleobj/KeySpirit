@@ -31,12 +31,14 @@ class ImageMatcher private constructor() {
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < timeout) {
             val screenBitmap = captureScreen() ?: continue
+            Log.d(TAG, "截图尺寸: ${screenBitmap.width}x${screenBitmap.height}, 查找区域: ${region?.left},${region?.top},${region?.right},${region?.bottom}")
             // 如果指定了区域，裁剪屏幕位图
             val (searchBitmap, offsetX, offsetY) = if (region != null) {
                 val left = region.left.coerceIn(0, screenBitmap.width)
                 val top = region.top.coerceIn(0, screenBitmap.height)
                 val right = region.right.coerceIn(left, screenBitmap.width)
                 val bottom = region.bottom.coerceIn(top, screenBitmap.height)
+                Log.d(TAG, "裁剪后区域: $left,$top,$right,$bottom, 裁剪尺寸: ${right-left}x${bottom-top}")
                 if (right - left < 10 || bottom - top < 10) {
                     Triple(screenBitmap, 0, 0)
                 } else {

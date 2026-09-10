@@ -43,12 +43,14 @@ class OcrHelper private constructor() {
     }
 
     private fun recognize(bitmap: Bitmap, target: String, region: Rect?): Point? {
+        Log.d(TAG, "OCR截图尺寸: ${bitmap.width}x${bitmap.height}, 查找区域: ${region?.left},${region?.top},${region?.right},${region?.bottom}")
         // 如果指定了区域，裁剪位图
         val (cropBitmap, offsetX, offsetY) = if (region != null) {
             val left = region.left.coerceIn(0, bitmap.width)
             val top = region.top.coerceIn(0, bitmap.height)
             val right = region.right.coerceIn(left, bitmap.width)
             val bottom = region.bottom.coerceIn(top, bitmap.height)
+            Log.d(TAG, "OCR裁剪后区域: $left,$top,$right,$bottom, 裁剪尺寸: ${right-left}x${bottom-top}")
             if (right - left < 10 || bottom - top < 10) {
                 Triple(bitmap, 0, 0)
             } else {
