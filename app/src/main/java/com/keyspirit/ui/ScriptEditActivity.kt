@@ -50,6 +50,10 @@ class ScriptEditActivity : AppCompatActivity() {
             Script()
         } ?: Script()
 
+        // 设置当前项目，截图会保存到这里
+        com.keyspirit.util.CurrentProjectHolder.currentScriptId = script!!.id
+        com.keyspirit.util.CurrentProjectHolder.currentScriptName = script!!.name
+
         etName = findViewById(R.id.etScriptName)
         etCode = findViewById(R.id.etCode)
         recyclerView = findViewById(R.id.stepList)
@@ -161,6 +165,8 @@ class ScriptEditActivity : AppCompatActivity() {
             StepType.FIND_IMAGE -> {
                 inputs["imagePath"] = addInput(layout, "图片路径", step.imagePath)
                 inputs["similarity"] = addInput(layout, "相似度(0-1)", step.similarity.toString())
+                // 添加从项目目录选图的按钮
+                addImagePickerButton(layout, inputs["imagePath"]!!)
                 addRegionInputs(layout, step, inputs)
             }
             StepType.FIND_TEXT -> {
@@ -225,6 +231,33 @@ class ScriptEditActivity : AppCompatActivity() {
         }
         parent.addView(et)
         return et
+    }
+
+    /**
+     * 添加"从项目目录选择图片"按钮，点击后列出当前项目截图目录的所有图片
+     */
+    private fun addImagePickerButton(parent: LinearLayout, targetInput: EditText) {
+        val btn = android.widget.Button(this).apply {
+            text = "从项目目录选择图片"
+            setOnClickListener {
+                val scriptId = script?.id ?: return@setOnClickListener
+                val screenshots = com.keyspirit.util.ScreenshotUtils.listProjectScreenshots(this@ScriptEditActivity, scriptId)
+                if (screenshots.isEmpty()) {
+                    android.widget.Toast.makeText(this@ScriptEditActivity, "项目目录下还没有截图，请先用悬浮窗截图", android.widget.Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                val fileNames = screenshots.map { it.name }.toTypedArray()
+                androidx.appcompat.app.AlertDialog.Builder(this@ScriptEditActivity)
+                    .setTitle("选择图片")
+                    .setItems(fileNames) { _, which ->
+                        val selectedFile = screenshots[which]
+                        targetInput.setText(selectedFile.absolutePath)
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+        }
+        parent.addView(btn)
     }
 
     private var currentEditingStep: ScriptStep? = null

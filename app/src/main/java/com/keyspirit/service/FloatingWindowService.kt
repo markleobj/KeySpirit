@@ -243,6 +243,10 @@ class FloatingWindowService : Service() {
             toast("请先开启无障碍服务")
             return
         }
+        // 设置当前项目，截图会保存到这个项目目录
+        com.keyspirit.util.CurrentProjectHolder.currentScriptId = script.id
+        com.keyspirit.util.CurrentProjectHolder.currentScriptName = script.name
+
         isExecuting = true
         currentScript = script
         scriptExecutor = ScriptExecutor(script, object : ScriptExecutor.ExecutionListener {
@@ -343,19 +347,18 @@ class FloatingWindowService : Service() {
             toast("截屏服务未启动，请先在 App 首页授权截屏权限")
             return
         }
-        // 同时保存到应用目录和相册
-        val appPath = com.keyspirit.util.ScreenshotUtils.saveToAppDir(this, bitmap)
-        val galleryUri = com.keyspirit.util.ScreenshotUtils.saveToGallery(this, bitmap)
-        when {
-            appPath != null && galleryUri != null -> {
-                toast("截图已保存到相册和: ${appPath.substringAfterLast('/')}")
-            }
-            appPath != null -> {
-                toast("截图已保存: ${appPath.substringAfterLast('/')}")
-            }
-            else -> {
-                toast("截图保存失败")
-            }
+        val scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
+        val scriptName = com.keyspirit.util.CurrentProjectHolder.currentScriptName
+        if (scriptId == null) {
+            toast("请先打开或运行一个脚本项目，再截图")
+            return
+        }
+        // 保存到当前项目的截图目录
+        val path = com.keyspirit.util.ScreenshotUtils.saveToProject(this, bitmap, scriptId)
+        if (path != null) {
+            toast("已保存到【$scriptName】项目: ${path.substringAfterLast('/')}")
+        } else {
+            toast("截图保存失败")
         }
     }
 

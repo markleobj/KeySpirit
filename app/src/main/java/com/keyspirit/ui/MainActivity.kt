@@ -115,6 +115,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openEditor(scriptId: String) {
+        // 设置当前项目
+        val script = scriptManager.getScript(scriptId)
+        if (script != null) {
+            com.keyspirit.util.CurrentProjectHolder.currentScriptId = script.id
+            com.keyspirit.util.CurrentProjectHolder.currentScriptName = script.name
+        }
         val intent = Intent(this, ScriptEditActivity::class.java).apply {
             putExtra(ScriptEditActivity.EXTRA_SCRIPT_ID, scriptId)
         }
@@ -122,6 +128,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun runScript(script: Script) {
+        // 设置当前项目
+        com.keyspirit.util.CurrentProjectHolder.currentScriptId = script.id
+        com.keyspirit.util.CurrentProjectHolder.currentScriptName = script.name
+
         startFloatingService()
         // 通知悬浮窗服务执行脚本
         val intent = Intent(this, FloatingWindowService::class.java).apply {

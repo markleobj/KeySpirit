@@ -2,9 +2,6 @@ package com.keyspirit.util
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.net.Uri
-import android.os.Environment
-import android.provider.MediaStore
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
@@ -17,19 +14,29 @@ object ScreenshotUtils {
     private const val TAG = "ScreenshotUtils"
 
     /**
-     * 保存截图到应用私有目录
+     * 保存截图到指定项目的截图目录
+     * @param context 上下文
+     * @param bitmap 截图位图
+     * @param scriptId 脚本（项目）ID
+     * @param customName 自定义文件名（不含扩展名），为空则自动生成
      * @return 保存的文件路径
      */
-    fun saveToAppDir(context: Context, bitmap: Bitmap): String? {
+    fun saveToProject(context: Context, bitmap: Bitmap, scriptId: String, customName: String? = null): String? {
         return try {
-            val dir = File(context.filesDir, "screenshots")
-            if (!dir.exists()) dir.mkdirs()
-            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val file = File(dir, "screenshot_$timeStamp.png")
+            val dir = File(context.filesDir, "projects/$scriptId/screenshots").apply {
+                if (!exists()) mkdirs()
+            }
+            val fileName = if (customName.isNullOrEmpty()) {
+                val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                "screenshot_$timeStamp.png"
+            } else {
+                "$customName.png"
+            }
+            val file = File(dir, fileName)
             FileOutputStream(file).use { out ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
-            Log.d(TAG, "截图已保存: ${file.absolutePath}")
+            Log.d(TAG, "截图已保存到项目目录: ${file.absolutePath}")
             file.absolutePath
         } catch (e: Exception) {
             Log.e(TAG, "保存截图失败", e)
@@ -38,53 +45,21 @@ object ScreenshotUtils {
     }
 
     /**
-     * 保存截图到系统相册（MediaStore）
-     * @return 保存的 Uri
+     * 获取指定项目的截图目录
      */
-    fun saveToGallery(context: Context, bitmap: Bitmap): Uri? {
-        return try {
-            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val displayName = "KeySpirit_$timeStamp.png"
-            val mimeType = "image/png"
-
-            val contentValues = android.content.ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
-                put(MediaStore.Images.Media.MIME_TYPE, mimeType)
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/KeySpirit")
-                }
-            }
-
-            val uri = context.contentResolver.insert(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues
-            )
-            uri?.let {
-                context.contentResolver.openOutputStream(it)?.use { out ->
-                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-                }
-            }
-            Log.d(TAG, "截图已保存到相册: $uri")
-            uri
-        } catch (e: Exception) {
-            Log.e(TAG, "保存截图到相册失败", e)
-            null
+    fun getProjectScreenshotsDir(context: Context, scriptId: String): File {
+        return File(context.filesDir, "projects/$scriptId/screenshots").apply {
+            if (!exists()) mkdirs()
         }
     }
 
     /**
-     * 获取截图保存目录
+     * 列出指定项目目录下的所有截图
      */
-    fun getScreenshotDir(context: Context): File {
-        val dir = File(context.filesDir, "screenshots")
-        if (!dir.exists()) dir.mkdirs()
-        return dir
-    }
-
-    /**
-     * 列出所有已保存的截图
-     */
-    fun listScreenshots(context: Context): List<File> {
-        val dir = getScreenshotDir(context)
-        return dir.listFiles { file -> file.extension == "png" }?.sortedByDescending { it.lastModified() } ?: emptyList()
+    fun listProjectScreenshots(context: Context, scriptId: String): List<File> {
+        val dir = getProjectScreenshotsDir(context, scriptId)
+        return dir.listFiles { file ->
+            file.extension.lowercase() in listOf("png", "jpg", "jpeg", "bmp")
+        }?.sortedByDescending { it.lastModified() } ?: emptyList()
     }
 }
