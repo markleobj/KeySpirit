@@ -44,6 +44,11 @@ class FloatingPanelView(context: Context) : LinearLayout(context) {
                 addButton("框选区域", "#1ABC9C") { onPickRegion?.invoke() }
                 addButton("运行", "#2E7D32") { onExecute?.invoke() }
                 addButton("✕", "#95A5A6") { onClose?.invoke() }
+                // 版本号显示
+                try {
+                    val versionName = context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                    addInfoText("v$versionName")
+                } catch (e: Exception) {}
             }
             PanelMode.RECORDING -> {
                 addButton("停止", "#E74C3C") { onStopRecord?.invoke() }

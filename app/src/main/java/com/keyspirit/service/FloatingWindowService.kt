@@ -228,9 +228,10 @@ class FloatingWindowService : Service() {
     }
 
     private var touchIndicator: View? = null
+    private var coordTextView: android.widget.TextView? = null
 
     private fun showRecordingOverlay() {
-        // 用 FrameLayout 承载透明触摸层 + 触摸点指示器
+        // 用 FrameLayout 承载透明触摸层 + 触摸点指示器 + 坐标文本
         val container = android.widget.FrameLayout(this).apply {
             setBackgroundColor(0x00000000)
         }
@@ -244,14 +245,34 @@ class FloatingWindowService : Service() {
         val indicatorSize = 30
         container.addView(touchIndicator, android.widget.FrameLayout.LayoutParams(indicatorSize, indicatorSize))
 
+        // 坐标文本显示（屏幕左上角，实时显示 rawX/rawY）
+        coordTextView = android.widget.TextView(this).apply {
+            setTextColor(android.graphics.Color.WHITE)
+            setBackgroundColor(0xCC000000.toInt())
+            textSize = 14f
+            setPadding(16, 8, 16, 8)
+            text = "触摸坐标: (-, -)"
+        }
+        container.addView(coordTextView, android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            leftMargin = 16
+            topMargin = 16
+        })
+
         container.setOnTouchListener { _, event ->
+            val rx = event.rawX
+            val ry = event.rawY
+            // 更新坐标文本
+            coordTextView?.text = "触摸坐标: (${rx.toInt()}, ${ry.toInt()})"
             // 更新指示器位置（以触摸点为中心）
             touchIndicator?.let { ind ->
-                ind.x = event.rawX - indicatorSize / 2f
-                ind.y = event.rawY - indicatorSize / 2f
+                ind.x = rx - indicatorSize / 2f
+                ind.y = ry - indicatorSize / 2f
                 ind.visibility = if (event.action == MotionEvent.ACTION_UP) View.GONE else View.VISIBLE
             }
-            android.util.Log.d("RecordTouch", "action=${event.action} rawX=${event.rawX} rawY=${event.rawY}")
+            android.util.Log.d("RecordTouch", "action=${event.action} rawX=${rx} rawY=${ry}")
             touchRecorder.onTouchEvent(event)
             touchRecorder.dispatchToApp(event)
             true

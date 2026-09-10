@@ -108,6 +108,25 @@ class ScreenCaptureService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
+        @Suppress("DEPRECATION")
+        val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
+
+        if (resultCode == 0 || data == null) {
+            Log.e(TAG, "onStartCommand 缺少截屏授权数据 (resultCode=$resultCode)")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        // Android 14+ 要求：必须先创建 MediaProjection，才能以 mediaProjection 类型启动前台服务
+        try {
+            initMediaProjection(resultCode, data)
+        } catch (e: Exception) {
+            Log.e(TAG, "initMediaProjection 失败", e)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
@@ -118,23 +137,10 @@ class ScreenCaptureService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, createNotification())
             }
+            Log.d(TAG, "前台服务已启动")
         } catch (e: Exception) {
             Log.e(TAG, "startForeground 失败", e)
-            stopSelf()
-            return START_NOT_STICKY
-        }
-
-        val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
-        @Suppress("DEPRECATION")
-        val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
-
-        if (resultCode != 0 && data != null) {
-            try {
-                initMediaProjection(resultCode, data)
-            } catch (e: Exception) {
-                Log.e(TAG, "initMediaProjection 失败", e)
-                stopSelf()
-            }
+            // 即使 startForeground 失败也不停止服务，MediaProjection 已经创建
         }
 
         return START_NOT_STICKY
