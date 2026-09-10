@@ -98,9 +98,8 @@ class RegionPickerActivity : AppCompatActivity() {
                 }
 
                 // 保存到 holder，供悬浮窗读取
-                com.keyspirit.util.RegionResultHolder.setRegion(
-                    android.graphics.Rect(left, top, right, bottom)
-                )
+                com.keyspirit.util.RegionResultHolder.region = intArrayOf(left, top, right, bottom)
+                com.keyspirit.util.RegionResultHolder.hasNewResult = true
 
                 // 返回结果给调用方（编辑器）
                 intent.putExtra(EXTRA_LEFT, left)

@@ -145,6 +145,7 @@ class ScriptEditActivity : AppCompatActivity() {
                 if (step.type == StepType.TOUCH_DOWN || step.type == StepType.LONG_PRESS) {
                     inputs["duration"] = addInput(layout, "持续时间(ms)", step.duration.toString())
                 }
+                addCoordinatePickerButton(layout, inputs["x"]!!, inputs["y"]!!)
             }
             StepType.SWIPE -> {
                 inputs["x1"] = addInput(layout, "起点 X", step.x1.toString())
@@ -152,11 +153,13 @@ class ScriptEditActivity : AppCompatActivity() {
                 inputs["x2"] = addInput(layout, "终点 X", step.x2.toString())
                 inputs["y2"] = addInput(layout, "终点 Y", step.y2.toString())
                 inputs["duration"] = addInput(layout, "时长(ms)", step.duration.toString())
+                addSwipeCoordinatePickerButtons(layout, inputs["x1"]!!, inputs["y1"]!!, inputs["x2"]!!, inputs["y2"]!!)
             }
             StepType.LONG_PRESS -> {
                 inputs["x"] = addInput(layout, "X 坐标", step.x.toString())
                 inputs["y"] = addInput(layout, "Y 坐标", step.y.toString())
                 inputs["duration"] = addInput(layout, "时长(ms)", step.duration.toString())
+                addCoordinatePickerButton(layout, inputs["x"]!!, inputs["y"]!!)
             }
             StepType.DELAY -> {
                 inputs["delay"] = addInput(layout, "延迟(ms)", step.delay.toString())
@@ -260,6 +263,70 @@ class ScriptEditActivity : AppCompatActivity() {
         parent.addView(btn)
     }
 
+    /**
+     * 坐标选取按钮：通过悬浮窗在任意 App 上选取坐标
+     */
+    private fun addCoordinatePickerButton(parent: LinearLayout, xInput: EditText, yInput: EditText) {
+        val btn = android.widget.Button(this).apply {
+            text = "📍 选取坐标"
+            setOnClickListener {
+                currentEditingStep?.let { pendingCoordinateStep = it }
+                pendingXInput = xInput
+                pendingYInput = yInput
+                startCoordinatePicker()
+            }
+        }
+        parent.addView(btn)
+    }
+
+    /**
+     * 滑动坐标选取按钮：选取起点和终点
+     */
+    private fun addSwipeCoordinatePickerButtons(parent: LinearLayout, x1Input: EditText, y1Input: EditText, x2Input: EditText, y2Input: EditText) {
+        val btn1 = android.widget.Button(this).apply {
+            text = "📍 选取起点"
+            setOnClickListener {
+                currentEditingStep?.let { pendingCoordinateStep = it }
+                pendingXInput = x1Input
+                pendingYInput = y1Input
+                startCoordinatePicker()
+            }
+        }
+        parent.addView(btn1)
+
+        val btn2 = android.widget.Button(this).apply {
+            text = "📍 选取终点"
+            setOnClickListener {
+                currentEditingStep?.let { pendingCoordinateStep = it }
+                pendingXInput = x2Input
+                pendingYInput = y2Input
+                startCoordinatePicker()
+            }
+        }
+        parent.addView(btn2)
+    }
+
+    private var pendingCoordinateStep: ScriptStep? = null
+    private var pendingXInput: EditText? = null
+    private var pendingYInput: EditText? = null
+    private var pendingRegionStep: ScriptStep? = null
+    private var pendingRegionInputs: MutableMap<String, EditText>? = null
+
+    /**
+     * 启动悬浮窗坐标选取，把 App 退到后台，用户可在任意 App 上点击
+     */
+    private fun startCoordinatePicker() {
+        com.keyspirit.util.CoordinateResultHolder.hasResult = false
+        // 启动悬浮窗服务并触发坐标选取
+        val intent = Intent(this, com.keyspirit.service.FloatingWindowService::class.java).apply {
+            action = com.keyspirit.service.FloatingWindowService.ACTION_PICK_COORDINATE
+        }
+        startService(intent)
+        // 退到后台，让用户看到目标 App
+        moveTaskToBack(true)
+        Toast.makeText(this, "请在目标 App 上点击选取坐标", Toast.LENGTH_SHORT).show()
+    }
+
     private var currentEditingStep: ScriptStep? = null
 
     private fun addRegionInputs(parent: LinearLayout, step: ScriptStep, inputs: MutableMap<String, EditText>) {
@@ -295,8 +362,16 @@ class ScriptEditActivity : AppCompatActivity() {
             textSize = 14f
             setOnClickListener {
                 currentEditingStep = step
-                val intent = Intent(this@ScriptEditActivity, RegionPickerActivity::class.java)
-                startActivityForResult(intent, REQUEST_REGION)
+                pendingRegionStep = step
+                pendingRegionInputs = inputs
+                // 通过悬浮窗选取区域，不跳转 Activity
+                com.keyspirit.util.RegionResultHolder.hasNewResult = false
+                val intent = Intent(this@ScriptEditActivity, com.keyspirit.service.FloatingWindowService::class.java).apply {
+                    action = com.keyspirit.service.FloatingWindowService.ACTION_PICK_REGION
+                }
+                startService(intent)
+                moveTaskToBack(true)
+                Toast.makeText(this@ScriptEditActivity, "请在目标 App 上拖动框选区域", Toast.LENGTH_SHORT).show()
             }
         }
         val params = LinearLayout.LayoutParams(
@@ -309,22 +384,31 @@ class ScriptEditActivity : AppCompatActivity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_REGION && resultCode == RESULT_OK) {
-            data?.let {
-                val left = it.getIntExtra(RegionPickerActivity.EXTRA_LEFT, 0)
-                val top = it.getIntExtra(RegionPickerActivity.EXTRA_TOP, 0)
-                val right = it.getIntExtra(RegionPickerActivity.EXTRA_RIGHT, 0)
-                val bottom = it.getIntExtra(RegionPickerActivity.EXTRA_BOTTOM, 0)
-                currentEditingStep?.let { step ->
-                    step.useRegion = true
-                    step.regionLeft = left
-                    step.regionTop = top
-                    step.regionRight = right
-                    step.regionBottom = bottom
-                }
-                refreshStepList()
-                Toast.makeText(this, "区域已设置: ($left,$top)-($right,$bottom)", Toast.LENGTH_SHORT).show()
-            }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 检查坐标选取结果
+        val coord = com.keyspirit.util.CoordinateResultHolder.consume()
+        if (coord != null && pendingXInput != null && pendingYInput != null) {
+            pendingXInput?.setText(coord.first.toString())
+            pendingYInput?.setText(coord.second.toString())
+            Toast.makeText(this, "坐标已设置: (${coord.first}, ${coord.second})", Toast.LENGTH_SHORT).show()
+            pendingXInput = null
+            pendingYInput = null
+            pendingCoordinateStep = null
+        }
+        // 检查区域选取结果
+        val region = com.keyspirit.util.RegionResultHolder.consumeRegion()
+        if (region != null && pendingRegionInputs != null) {
+            pendingRegionInputs?.get("regionLeft")?.setText(region[0].toString())
+            pendingRegionInputs?.get("regionTop")?.setText(region[1].toString())
+            pendingRegionInputs?.get("regionRight")?.setText(region[2].toString())
+            pendingRegionInputs?.get("regionBottom")?.setText(region[3].toString())
+            pendingRegionStep?.useRegion = true
+            Toast.makeText(this, "区域已设置: (${region[0]},${region[1]})-(${region[2]},${region[3]})", Toast.LENGTH_SHORT).show()
+            pendingRegionInputs = null
+            pendingRegionStep = null
         }
     }
 

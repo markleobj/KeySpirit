@@ -1,26 +1,19 @@
 package com.keyspirit.util
 
-import android.graphics.Rect
-
 /**
- * 持有最近一次区域选取的结果，供悬浮窗服务读取
+ * 持有最近一次区域选取的结果，供编辑器读取
  */
 object RegionResultHolder {
     @Volatile
-    var lastRegion: Rect? = null
+    var region: IntArray? = null  // [left, top, right, bottom]
 
     @Volatile
     var hasNewResult: Boolean = false
 
-    fun setRegion(rect: Rect) {
-        lastRegion = rect
-        hasNewResult = true
-    }
-
-    fun consumeRegion(): Rect? {
-        return if (hasNewResult) {
+    fun consumeRegion(): IntArray? {
+        return if (hasNewResult && region != null) {
             hasNewResult = false
-            lastRegion
+            region
         } else {
             null
         }

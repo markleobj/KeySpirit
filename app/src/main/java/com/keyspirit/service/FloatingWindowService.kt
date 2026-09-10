@@ -39,6 +39,8 @@ class FloatingWindowService : Service() {
         const val ACTION_SHOW = "com.keyspirit.SHOW"
         const val ACTION_HIDE = "com.keyspirit.HIDE"
         const val ACTION_EXECUTE_SCRIPT = "com.keyspirit.EXECUTE_SCRIPT"
+        const val ACTION_PICK_COORDINATE = "com.keyspirit.PICK_COORDINATE"
+        const val ACTION_PICK_REGION = "com.keyspirit.PICK_REGION"
         const val EXTRA_SCRIPT_ID = "script_id"
     }
 
@@ -46,6 +48,7 @@ class FloatingWindowService : Service() {
     private var floatingBall: FloatingBallView? = null
     private var floatingPanel: FloatingPanelView? = null
     private var recordingOverlay: View? = null
+    private var pickerOverlay: View? = null  // 坐标/区域选取的全屏悬浮层
 
     private var isPanelVisible = false
     private var isRecording = false
@@ -84,6 +87,12 @@ class FloatingWindowService : Service() {
                 val scriptId = intent.getStringExtra(EXTRA_SCRIPT_ID) ?: return START_NOT_STICKY
                 val script = scriptManager.getScript(scriptId) ?: return START_NOT_STICKY
                 startExecution(script)
+            }
+            ACTION_PICK_COORDINATE -> {
+                pickCoordinate()
+            }
+            ACTION_PICK_REGION -> {
+                pickRegion()
             }
             ACTION_HIDE -> {
                 hideAll()
@@ -315,38 +324,176 @@ class FloatingWindowService : Service() {
         toast("已停止执行")
     }
 
-    // ============ 取坐标 ============
+    // ============ 取坐标（全屏悬浮层，不跳转 Activity） ============
 
     private fun pickCoordinate() {
         hidePanel()
-        val intent = Intent().apply {
-            setClassName("com.keyspirit", "com.keyspirit.ui.CoordinatePickerActivity")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        startActivity(intent)
+        showCoordinateOverlay()
     }
+
+    private fun showCoordinateOverlay() {
+        // 先隐藏悬浮球，避免遮挡
+        floatingBall?.visibility = View.GONE
+
+        val overlay = View(this).apply {
+            setBackgroundColor(0x33000000) // 半透明黑色
+            setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                        // 实时显示坐标
+                        val x = event.rawX.toInt()
+                        val y = event.rawY.toInt()
+                        showPickerToast("X: $x, Y: $y  （松开确认）")
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val x = event.rawX.toInt()
+                        val y = event.rawY.toInt()
+                        // 保存坐标结果
+                        com.keyspirit.util.CoordinateResultHolder.x = x
+                        com.keyspirit.util.CoordinateResultHolder.y = y
+                        com.keyspirit.util.CoordinateResultHolder.hasResult = true
+                        removePickerOverlay()
+                        toast("已选取坐标: ($x, $y)")
+                    }
+                }
+                true
+            }
+        }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        )
+        windowManager.addView(overlay, params)
+        pickerOverlay = overlay
+        showPickerToast("点击屏幕任意位置选取坐标")
+    }
+
+    // ============ 区域选取（全屏悬浮层，不跳转 Activity） ============
 
     private fun pickRegion() {
         hidePanel()
+        showRegionOverlay()
+    }
+
+    private fun showRegionOverlay() {
+        floatingBall?.visibility = View.GONE
         com.keyspirit.util.RegionResultHolder.hasNewResult = false
-        val intent = Intent().apply {
-            setClassName("com.keyspirit", "com.keyspirit.ui.RegionPickerActivity")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        startActivity(intent)
-        // 轮询区域选取结果
-        val start = System.currentTimeMillis()
-        val checkRunnable = object : Runnable {
-            override fun run() {
-                val region = com.keyspirit.util.RegionResultHolder.consumeRegion()
-                if (region != null) {
-                    toast("区域: (${region.left},${region.top})-(${region.right},${region.bottom})")
-                } else if (System.currentTimeMillis() - start < 15000) {
-                    handler.postDelayed(this, 500)
+
+        var startX = 0f
+        var startY = 0f
+        var regionView: View? = null
+
+        val overlay = View(this).apply {
+            setBackgroundColor(0x33000000)
+            setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        startX = event.rawX
+                        startY = event.rawY
+                        // 创建选区框
+                        regionView = View(this@FloatingWindowService).apply {
+                            setBackgroundColor(0x440066FF.toInt())
+                        }
+                        val rParams = WindowManager.LayoutParams(
+                            0, 0,
+                            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                            PixelFormat.TRANSLUCENT
+                        )
+                        windowManager.addView(regionView, rParams)
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val curX = event.rawX
+                        val curY = event.rawY
+                        val left = minOf(startX, curX).toInt()
+                        val top = minOf(startY, curY).toInt()
+                        val width = Math.abs(curX - startX).toInt()
+                        val height = Math.abs(curY - startY).toInt()
+                        regionView?.let { rv ->
+                            val lp = rv.layoutParams as WindowManager.LayoutParams
+                            lp.x = left
+                            lp.y = top
+                            lp.width = width
+                            lp.height = height
+                            windowManager.updateViewLayout(rv, lp)
+                        }
+                        showPickerToast("区域: ${width}x${height}")
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val endX = event.rawX
+                        val endY = event.rawY
+                        val left = minOf(startX, endX).toInt()
+                        val top = minOf(startY, endY).toInt()
+                        val right = maxOf(startX, endX).toInt()
+                        val bottom = maxOf(startY, endY).toInt()
+                        // 移除选区框
+                        regionView?.let { windowManager.removeView(it) }
+                        // 保存结果
+                        com.keyspirit.util.RegionResultHolder.region = intArrayOf(left, top, right, bottom)
+                        com.keyspirit.util.RegionResultHolder.hasNewResult = true
+                        removePickerOverlay()
+                        toast("已选取区域: [$left, $top, $right, $bottom]")
+                    }
                 }
+                true
             }
         }
-        handler.postDelayed(checkRunnable, 500)
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        )
+        windowManager.addView(overlay, params)
+        pickerOverlay = overlay
+        showPickerToast("拖动选择区域")
+    }
+
+    private fun removePickerOverlay() {
+        pickerOverlay?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+        }
+        pickerOverlay = null
+        floatingBall?.visibility = View.VISIBLE
+    }
+
+    private var pickerToastView: android.widget.TextView? = null
+    private fun showPickerToast(msg: String) {
+        pickerToastView?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+        }
+        val tv = android.widget.TextView(this).apply {
+            text = msg
+            setTextColor(android.graphics.Color.WHITE)
+            setBackgroundColor(0xCC000000.toInt())
+            setPadding(40, 20, 40, 20)
+            textSize = 14f
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = 200
+        }
+        windowManager.addView(tv, params)
+        pickerToastView = tv
+        // 自动消失（仅对非实时提示）
+        handler.postDelayed({
+            pickerToastView?.let {
+                try { windowManager.removeView(it) } catch (_: Exception) {}
+                pickerToastView = null
+            }
+        }, 3000)
     }
 
     private fun takeScreenshot() {
@@ -391,6 +538,11 @@ class FloatingWindowService : Service() {
     private fun hideAll() {
         hidePanel()
         hideRecordingOverlay()
+        removePickerOverlay()
+        pickerToastView?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+        }
+        pickerToastView = null
         floatingBall?.let { windowManager.removeView(it) }
         floatingBall = null
     }
