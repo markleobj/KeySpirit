@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">按键精灵</string>
+    <string name="accessibility_service_label">按键精灵自动化服务</string>
+    <string name="accessibility_service_description">允许按键精灵在屏幕上执行点击、滑动等操作，用于自动化脚本的录制与执行。</string>
+    <string name="channel_floating">悬浮窗服务</string>
+    <string name="channel_capture">截屏服务</string>
+</resources>
