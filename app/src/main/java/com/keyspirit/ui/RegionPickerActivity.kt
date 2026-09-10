@@ -97,13 +97,20 @@ class RegionPickerActivity : AppCompatActivity() {
                     return true
                 }
 
-                // 返回结果
+                // 保存到 holder，供悬浮窗读取
+                com.keyspirit.util.RegionResultHolder.setRegion(
+                    android.graphics.Rect(left, top, right, bottom)
+                )
+
+                // 返回结果给调用方（编辑器）
                 intent.putExtra(EXTRA_LEFT, left)
                 intent.putExtra(EXTRA_TOP, top)
                 intent.putExtra(EXTRA_RIGHT, right)
                 intent.putExtra(EXTRA_BOTTOM, bottom)
                 setResult(RESULT_OK, intent)
-                finish()
+
+                infoText.text = "区域: ($left,$top)-($right,$bottom)  宽:${right - left} 高:${bottom - top}  已保存"
+                android.os.Handler(mainLooper).postDelayed({ finish() }, 800)
             }
         }
         drawView.invalidate()

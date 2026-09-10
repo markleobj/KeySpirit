@@ -315,27 +315,47 @@ class FloatingWindowService : Service() {
 
     private fun pickRegion() {
         hidePanel()
+        com.keyspirit.util.RegionResultHolder.hasNewResult = false
         val intent = Intent().apply {
             setClassName("com.keyspirit", "com.keyspirit.ui.RegionPickerActivity")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         startActivity(intent)
+        // 轮询区域选取结果
+        val start = System.currentTimeMillis()
+        val checkRunnable = object : Runnable {
+            override fun run() {
+                val region = com.keyspirit.util.RegionResultHolder.consumeRegion()
+                if (region != null) {
+                    toast("区域: (${region.left},${region.top})-(${region.right},${region.bottom})")
+                } else if (System.currentTimeMillis() - start < 15000) {
+                    handler.postDelayed(this, 500)
+                }
+            }
+        }
+        handler.postDelayed(checkRunnable, 500)
     }
 
     private fun takeScreenshot() {
         hidePanel()
         val bitmap = com.keyspirit.util.ScreenCaptureHolder.latestBitmap
         if (bitmap == null) {
-            // 如果截屏服务未运行，尝试启动
-            toast("截屏服务未启动，请先在脚本中使用找图/找文字功能以激活截屏")
+            toast("截屏服务未启动，请先在 App 首页授权截屏权限")
             return
         }
-        // 保存到应用目录
-        val path = com.keyspirit.util.ScreenshotUtils.saveToAppDir(this, bitmap)
-        if (path != null) {
-            toast("截图已保存: ${path.substringAfterLast('/')}")
-        } else {
-            toast("截图保存失败")
+        // 同时保存到应用目录和相册
+        val appPath = com.keyspirit.util.ScreenshotUtils.saveToAppDir(this, bitmap)
+        val galleryUri = com.keyspirit.util.ScreenshotUtils.saveToGallery(this, bitmap)
+        when {
+            appPath != null && galleryUri != null -> {
+                toast("截图已保存到相册和: ${appPath.substringAfterLast('/')}")
+            }
+            appPath != null -> {
+                toast("截图已保存: ${appPath.substringAfterLast('/')}")
+            }
+            else -> {
+                toast("截图保存失败")
+            }
         }
     }
 

@@ -1,11 +1,14 @@
 package com.keyspirit.ui
 
+import android.content.Context
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -14,6 +17,7 @@ import com.keyspirit.R
 import com.keyspirit.script.Script
 import com.keyspirit.script.ScriptManager
 import com.keyspirit.service.FloatingWindowService
+import com.keyspirit.service.ScreenCaptureService
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -23,6 +27,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var scriptManager: ScriptManager
     private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: ScriptAdapter
+    private lateinit var projectionManager: MediaProjectionManager
+
+    companion object {
+        private const val REQUEST_SCREEN_CAPTURE = 2001
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,6 +40,7 @@ class MainActivity : AppCompatActivity() {
         scriptManager = KeySpiritApp.instance.scriptManager
         recyclerView = findViewById(R.id.scriptList)
         recyclerView.layoutManager = LinearLayoutManager(this)
+        projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
         findViewById<View>(R.id.btnSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
@@ -44,6 +54,41 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.btnStartRecord).setOnClickListener {
             startFloatingService()
+        }
+
+        // 初始化截屏权限（用于找图/找文字/截图）
+        if (!ScreenCaptureService.isRunning()) {
+            requestScreenCapture()
+        }
+    }
+
+    private fun requestScreenCapture() {
+        try {
+            startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_SCREEN_CAPTURE)
+        } catch (e: Exception) {
+            Toast.makeText(this, "无法请求截屏权限", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_SCREEN_CAPTURE) {
+            if (resultCode == RESULT_OK && data != null) {
+                // 启动截屏服务
+                val intent = Intent(this, ScreenCaptureService::class.java).apply {
+                    putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, resultCode)
+                    putExtra(ScreenCaptureService.EXTRA_DATA, data)
+                }
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
+                    startService(intent)
+                }
+                Toast.makeText(this, "截屏服务已启动", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "未授权截屏，找图/找文字/截图功能不可用", Toast.LENGTH_LONG).show()
+            }
         }
     }
 

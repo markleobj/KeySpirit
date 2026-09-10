@@ -5,6 +5,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import com.keyspirit.script.ScriptManager
+import com.keyspirit.util.ImageMatcher
+import com.keyspirit.util.OcrHelper
 
 class KeySpiritApp : Application() {
 
@@ -15,6 +17,8 @@ class KeySpiritApp : Application() {
         super.onCreate()
         instance = this
         scriptManager = ScriptManager(this)
+        ImageMatcher.init()
+        OcrHelper.init()
         createNotificationChannels()
     }
 
