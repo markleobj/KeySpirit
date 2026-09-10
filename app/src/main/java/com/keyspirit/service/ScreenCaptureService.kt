@@ -118,15 +118,16 @@ class ScreenCaptureService : Service() {
             return START_NOT_STICKY
         }
 
-        // Android 14+ 要求：必须先创建 MediaProjection，才能以 mediaProjection 类型启动前台服务
+        // 第一步：创建 MediaProjection 对象（Android 14 要求 mediaProjection 前台服务启动前必须已有 MediaProjection）
         try {
-            initMediaProjection(resultCode, data)
+            createMediaProjection(resultCode, data)
         } catch (e: Exception) {
-            Log.e(TAG, "initMediaProjection 失败", e)
+            Log.e(TAG, "createMediaProjection 失败", e)
             stopSelf()
             return START_NOT_STICKY
         }
 
+        // 第二步：立即启动前台服务（必须在 onStartCommand 5秒内调用）
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
@@ -140,7 +141,13 @@ class ScreenCaptureService : Service() {
             Log.d(TAG, "前台服务已启动")
         } catch (e: Exception) {
             Log.e(TAG, "startForeground 失败", e)
-            // 即使 startForeground 失败也不停止服务，MediaProjection 已经创建
+        }
+
+        // 第三步：服务成为前台后，再创建 VirtualDisplay（避免在非前台状态创建导致崩溃）
+        try {
+            setupVirtualDisplay()
+        } catch (e: Exception) {
+            Log.e(TAG, "setupVirtualDisplay 失败", e)
         }
 
         return START_NOT_STICKY
@@ -155,19 +162,22 @@ class ScreenCaptureService : Service() {
             .build()
     }
 
-    private fun initMediaProjection(resultCode: Int, data: Intent) {
+    /**
+     * 仅创建 MediaProjection 对象并获取屏幕尺寸，不创建 VirtualDisplay。
+     * 这一步在 startForeground 之前完成，满足 Android 14 的要求。
+     */
+    private fun createMediaProjection(resultCode: Int, data: Intent) {
         val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val projection = manager.getMediaProjection(resultCode, data)
         mediaProjection = projection
         projection.registerCallback(projectionCallback, mainHandler)
 
-        // 获取真实屏幕尺寸：优先用 Resources.getSystem()，它总是返回真实屏幕尺寸
+        // 获取真实屏幕尺寸
         val sysMetrics = Resources.getSystem().displayMetrics
         screenWidth = sysMetrics.widthPixels
         screenHeight = sysMetrics.heightPixels
         screenDensity = sysMetrics.densityDpi
 
-        // 再用 WindowManager 校验一次
         try {
             val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
             val dm = DisplayMetrics()
@@ -179,13 +189,21 @@ class ScreenCaptureService : Service() {
                 if (dm.densityDpi > 0) screenDensity = dm.densityDpi
             }
         } catch (e: Exception) {
-            Log.w(TAG, "getRealMetrics 失败，使用 Resources.getSystem() 的值", e)
+            Log.w(TAG, "getRealMetrics 失败", e)
         }
 
-        Log.d(TAG, "屏幕尺寸: ${screenWidth}x${screenHeight}, density=$screenDensity")
+        Log.d(TAG, "MediaProjection 已创建，屏幕尺寸: ${screenWidth}x${screenHeight}, density=$screenDensity")
         lastError = "屏幕尺寸: ${screenWidth}x${screenHeight}, density=$screenDensity"
+    }
 
-        // 创建 ImageReader 和 VirtualDisplay
+    /**
+     * 创建 ImageReader 和 VirtualDisplay。必须在 startForeground 之后调用。
+     */
+    private fun setupVirtualDisplay() {
+        val projection = mediaProjection ?: run {
+            Log.e(TAG, "setupVirtualDisplay: mediaProjection 为 null")
+            return
+        }
         imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 3)
         imageReader!!.setOnImageAvailableListener(imageAvailableListener, mainHandler)
 
@@ -197,7 +215,7 @@ class ScreenCaptureService : Service() {
         )
 
         initDone = true
-        Log.d(TAG, "MediaProjection 初始化成功，VirtualDisplay 已创建，等待首帧...")
+        Log.d(TAG, "VirtualDisplay 已创建，等待首帧...")
     }
 
     /**
