@@ -45,6 +45,12 @@ class ScreenCaptureService : Service() {
         const val STATE_RUNNING = 2
         const val STATE_ERROR = 3
 
+        // 前台服务类型
+        private const val FG_TYPE_NONE = 0
+        private const val FG_TYPE_MEDIA_PROJECTION = 1
+        private const val FG_TYPE_SPECIAL_USE = 2
+        private const val FG_TYPE_NO_TYPE = 3
+
         var instance: ScreenCaptureService? = null
             private set
 
@@ -138,50 +144,73 @@ class ScreenCaptureService : Service() {
         @Suppress("DEPRECATION")
         val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
 
-        Log.d(TAG, "onStartCommand: resultCode=$resultCode, data=${data != null}")
+        Log.d(TAG, "onStartCommand: resultCode=$resultCode, data=${data != null}, SDK=${Build.VERSION.SDK_INT}")
 
-        // Android 14+ 必须在 5 秒内调用 startForeground，否则崩溃。
-        // 所以无论成功失败，都先想办法调到 startForeground，再决定后续。
-
-        // 第一步：创建 MediaProjection 对象
-        var projectionOk = false
-        var projectionError = ""
         if (resultCode == 0 || data == null) {
-            projectionError = "截屏授权数据缺失 (resultCode=$resultCode, data=${data != null})"
-            Log.e(TAG, "onStartCommand: $projectionError")
-        } else {
-            try {
-                createMediaProjection(resultCode, data)
-                projectionOk = mediaProjection != null
-                if (!projectionOk) {
-                    projectionError = "MediaProjection 对象为 null"
-                }
-            } catch (e: Exception) {
-                projectionError = "createMediaProjection 异常: ${e.message}"
-                Log.e(TAG, "createMediaProjection 失败", e)
-            }
-        }
-
-        // 第二步：立即启动前台服务（必须在 onStartCommand 5秒内调用）
-        val fgOk = startForegroundRobust(projectionOk)
-
-        if (!fgOk) {
-            // startForeground 完全失败，系统会在 5 秒后杀服务，不如主动停止
-            Log.e(TAG, "startForeground 完全失败，停止服务")
-            setState(STATE_ERROR, "无法启动前台服务: $projectionError")
+            val msg = "截屏授权数据缺失 (resultCode=$resultCode, data=${data != null})"
+            Log.e(TAG, "onStartCommand: $msg")
+            startForegroundForMediaProjection()
+            setState(STATE_ERROR, msg)
             stopSelf()
             return START_NOT_STICKY
         }
 
+        // Android 14+ (API 34) 关键要求：
+        // getMediaProjection() 必须在服务成为前台服务(mediaProjection类型)之后调用，
+        // 否则会抛 SecurityException: "Media projections require a foreground service..."
+        // 所以顺序必须是：startForeground → getMediaProjection → createVirtualDisplay
+
+        // 第一步：立即启动前台服务（mediaProjection 类型）
+        // 注意：Android 14 允许在没有 MediaProjection 对象的情况下，
+        // 用 mediaProjection 类型调用 startForeground（只要有用户授权）。
+        val fgType = startForegroundForMediaProjection()
+
+        if (fgType == FG_TYPE_NONE) {
+            Log.e(TAG, "startForeground 完全失败，停止服务")
+            setState(STATE_ERROR, "无法启动前台服务")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        Log.d(TAG, "startForeground 成功，类型=$fgType，现在创建 MediaProjection")
+
+        // 第二步：现在服务已是前台服务，可以安全创建 MediaProjection
+        var projectionOk = false
+        var projectionError = ""
+        try {
+            createMediaProjection(resultCode, data)
+            projectionOk = mediaProjection != null
+            if (!projectionOk) {
+                projectionError = "MediaProjection 对象为 null"
+            }
+        } catch (e: Exception) {
+            projectionError = "createMediaProjection 异常: ${e.message}"
+            Log.e(TAG, "createMediaProjection 失败", e)
+        }
+
+        // 如果之前用了 specialUse 兜底，现在 MediaProjection 创建成功了，
+        // 重新用 mediaProjection 类型启动前台服务（Android 14 要求）
+        if (projectionOk && fgType != FG_TYPE_MEDIA_PROJECTION) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(
+                        NOTIFICATION_ID, createNotification(),
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                    )
+                    Log.d(TAG, "已升级前台服务类型为 mediaProjection")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "升级前台服务类型失败，继续使用 specialUse", e)
+            }
+        }
+
         if (!projectionOk) {
-            // MediaProjection 创建失败，但前台服务已启动。
-            // 保持服务运行并标记 ERROR，让用户能看到诊断信息，而不是静默退出。
             Log.e(TAG, "MediaProjection 创建失败: $projectionError")
             setState(STATE_ERROR, projectionError)
             return START_NOT_STICKY
         }
 
-        // 第三步：服务成为前台后，再创建 VirtualDisplay
+        // 第三步：创建 VirtualDisplay
         try {
             setupVirtualDisplay()
             setState(STATE_RUNNING, "")
@@ -195,27 +224,29 @@ class ScreenCaptureService : Service() {
     }
 
     /**
-     * 健壮地启动前台服务：依次尝试 mediaProjection → specialUse → 无类型。
-     * 只要有一种成功就返回 true。
+     * 启动前台服务用于截屏：优先 mediaProjection 类型，失败则降级。
+     * 返回实际使用的前台服务类型（FG_TYPE_*）。
+     * 注意：Android 14+ 允许在创建 MediaProjection 之前就用 mediaProjection 类型
+     * 调用 startForeground（只要持有用户授权）。
      */
-    private fun startForegroundRobust(projectionOk: Boolean): Boolean {
+    private fun startForegroundForMediaProjection(): Int {
         val notification = createNotification()
 
-        // 尝试 1: 如果 MediaProjection 成功，用 mediaProjection 类型
-        if (projectionOk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // 尝试 1: mediaProjection 类型（Android 10+）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 startForeground(
                     NOTIFICATION_ID, notification,
                     android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
                 )
                 Log.d(TAG, "startForeground 成功 (mediaProjection)")
-                return true
+                return FG_TYPE_MEDIA_PROJECTION
             } catch (e: Exception) {
                 Log.w(TAG, "startForeground(mediaProjection) 失败，降级到 specialUse", e)
             }
         }
 
-        // 尝试 2: specialUse 类型
+        // 尝试 2: specialUse 类型（Android 10+）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 startForeground(
@@ -223,7 +254,7 @@ class ScreenCaptureService : Service() {
                     android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 )
                 Log.d(TAG, "startForeground 成功 (specialUse)")
-                return true
+                return FG_TYPE_SPECIAL_USE
             } catch (e: Exception) {
                 Log.w(TAG, "startForeground(specialUse) 失败，降级到无类型", e)
             }
@@ -233,10 +264,10 @@ class ScreenCaptureService : Service() {
         try {
             startForeground(NOTIFICATION_ID, notification)
             Log.d(TAG, "startForeground 成功 (无类型)")
-            return true
+            return FG_TYPE_NO_TYPE
         } catch (e: Exception) {
             Log.e(TAG, "startForeground(无类型) 也失败", e)
-            return false
+            return FG_TYPE_NONE
         }
     }
 
