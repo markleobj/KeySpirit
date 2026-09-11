@@ -465,7 +465,8 @@ class FloatingWindowService : Service() {
         var startY = 0f
         var regionView: View? = null
 
-        val overlay = View(this).apply {
+        // 用 FrameLayout 作为 overlay，regionView 作为子视图，保证坐标一致
+        val overlay = android.widget.FrameLayout(this).apply {
             setBackgroundColor(0x33000000)
             setOnTouchListener { _, event ->
                 when (event.action) {
@@ -475,31 +476,26 @@ class FloatingWindowService : Service() {
                         regionView = View(this@FloatingWindowService).apply {
                             background = createDashedBorder()
                         }
-                        windowManager.addView(regionView, WindowManager.LayoutParams(
-                            0, 0,
-                            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                            PixelFormat.TRANSLUCENT
-                        ))
+                        val lp = android.widget.FrameLayout.LayoutParams(0, 0)
+                        lp.leftMargin = startX.toInt()
+                        lp.topMargin = startY.toInt()
+                        addView(regionView, lp)
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        val r = regionView?.layoutParams as? WindowManager.LayoutParams
-                        if (r != null) {
-                            r.x = Math.min(startX, event.rawX).toInt()
-                            r.y = Math.min(startY, event.rawY).toInt()
-                            r.width = Math.abs(event.rawX - startX).toInt()
-                            r.height = Math.abs(event.rawY - startY).toInt()
-                            windowManager.updateViewLayout(regionView, r)
-                        }
+                        val rv = regionView ?: return@setOnTouchListener true
+                        val lp = rv.layoutParams as android.widget.FrameLayout.LayoutParams
+                        lp.leftMargin = Math.min(startX, event.rawX).toInt()
+                        lp.topMargin = Math.min(startY, event.rawY).toInt()
+                        lp.width = Math.abs(event.rawX - startX).toInt()
+                        lp.height = Math.abs(event.rawY - startY).toInt()
+                        rv.layoutParams = lp
                     }
                     MotionEvent.ACTION_UP -> {
                         val left = Math.min(startX, event.rawX).toInt()
                         val top = Math.min(startY, event.rawY).toInt()
                         val right = Math.max(startX, event.rawX).toInt()
                         val bottom = Math.max(startY, event.rawY).toInt()
-                        regionView?.let { windowManager.removeView(it) }
+                        regionView?.let { removeView(it) }
                         removePickerOverlay()
                         floatingBall?.visibility = View.VISIBLE
 
@@ -536,28 +532,40 @@ class FloatingWindowService : Service() {
     private fun captureRegionAndSave(left: Int, top: Int, right: Int, bottom: Int, existingStep: ScriptStep?) {
         val service = ScreenCaptureService.instance
         if (service == null) {
-            toast("截屏服务未启动")
+            toast("截屏服务未启动，请先授权截屏权限")
             openEditor()
             return
         }
+        // 截图前隐藏悬浮球，避免被截进去
+        floatingBall?.visibility = View.GONE
         Thread {
+            // 等屏幕刷新（遮罩层和悬浮球移除后）
+            try { Thread.sleep(200) } catch (_: InterruptedException) {}
+
             val bitmap = service.captureScreen()
             if (bitmap == null) {
                 handler.post {
-                    toast("截屏失败")
+                    floatingBall?.visibility = View.VISIBLE
+                    toast("截屏失败：${service.getDiagnosticInfo().takeLast(100)}")
                     openEditor()
                 }
                 return@Thread
             }
             // 裁剪区域
-            val cropLeft = left.coerceIn(0, bitmap.width)
-            val cropTop = top.coerceIn(0, bitmap.height)
-            val cropRight = right.coerceIn(cropLeft, bitmap.width)
-            val cropBottom = bottom.coerceIn(cropTop, bitmap.height)
+            val cropLeft = left.coerceIn(0, bitmap.width - 1)
+            val cropTop = top.coerceIn(0, bitmap.height - 1)
+            val cropRight = right.coerceIn(cropLeft + 1, bitmap.width)
+            val cropBottom = bottom.coerceIn(cropTop + 1, bitmap.height)
             val cropped = Bitmap.createBitmap(bitmap, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop)
 
             // 确保当前脚本已保存（获取 scriptId）
-            val script = editingScript ?: return@Thread
+            val script = editingScript ?: run {
+                handler.post {
+                    floatingBall?.visibility = View.VISIBLE
+                    openEditor()
+                }
+                return@Thread
+            }
             if (script.id.isBlank() || scriptManager.getScript(script.id) == null) {
                 script.name = script.name.ifEmpty { "未命名脚本" }
                 scriptManager.saveScript(script)
@@ -565,6 +573,7 @@ class FloatingWindowService : Service() {
 
             val path = com.keyspirit.util.ScreenshotUtils.saveToProject(this@FloatingWindowService, cropped, script.id)
             handler.post {
+                floatingBall?.visibility = View.VISIBLE
                 if (path != null) {
                     val step = existingStep ?: ScriptStep(type = StepType.FIND_IMAGE)
                     step.imagePath = path
@@ -576,7 +585,7 @@ class FloatingWindowService : Service() {
                     if (existingStep == null) {
                         editingScript?.steps?.add(step)
                     }
-                    toast("已截取目标图片并设置区域")
+                    toast("已截取目标图片并设置区域 (${cropped.width}x${cropped.height})")
                 } else {
                     toast("图片保存失败")
                 }
@@ -596,7 +605,7 @@ class FloatingWindowService : Service() {
         var startY = 0f
         var regionView: View? = null
 
-        val overlay = View(this).apply {
+        val overlay = android.widget.FrameLayout(this).apply {
             setBackgroundColor(0x33000000)
             setOnTouchListener { _, event ->
                 when (event.action) {
@@ -606,31 +615,26 @@ class FloatingWindowService : Service() {
                         regionView = View(this@FloatingWindowService).apply {
                             background = createDashedBorder()
                         }
-                        windowManager.addView(regionView, WindowManager.LayoutParams(
-                            0, 0,
-                            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                            PixelFormat.TRANSLUCENT
-                        ))
+                        val lp = android.widget.FrameLayout.LayoutParams(0, 0)
+                        lp.leftMargin = startX.toInt()
+                        lp.topMargin = startY.toInt()
+                        addView(regionView, lp)
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        val r = regionView?.layoutParams as? WindowManager.LayoutParams
-                        if (r != null) {
-                            r.x = Math.min(startX, event.rawX).toInt()
-                            r.y = Math.min(startY, event.rawY).toInt()
-                            r.width = Math.abs(event.rawX - startX).toInt()
-                            r.height = Math.abs(event.rawY - startY).toInt()
-                            windowManager.updateViewLayout(regionView, r)
-                        }
+                        val rv = regionView ?: return@setOnTouchListener true
+                        val lp = rv.layoutParams as android.widget.FrameLayout.LayoutParams
+                        lp.leftMargin = Math.min(startX, event.rawX).toInt()
+                        lp.topMargin = Math.min(startY, event.rawY).toInt()
+                        lp.width = Math.abs(event.rawX - startX).toInt()
+                        lp.height = Math.abs(event.rawY - startY).toInt()
+                        rv.layoutParams = lp
                     }
                     MotionEvent.ACTION_UP -> {
                         val left = Math.min(startX, event.rawX).toInt()
                         val top = Math.min(startY, event.rawY).toInt()
                         val right = Math.max(startX, event.rawX).toInt()
                         val bottom = Math.max(startY, event.rawY).toInt()
-                        regionView?.let { windowManager.removeView(it) }
+                        regionView?.let { removeView(it) }
                         removePickerOverlay()
                         floatingBall?.visibility = View.VISIBLE
 

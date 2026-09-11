@@ -272,23 +272,34 @@ class ScreenCaptureService : Service() {
             return null
         }
 
-        var image: Image? = null
-        synchronized(imageLock) {
-            if (latestImage == null) {
-                try {
-                    val deadline = System.currentTimeMillis() + 3000
-                    while (latestImage == null && System.currentTimeMillis() < deadline) {
-                        imageLock.wait(16)
-                    }
-                } catch (e: InterruptedException) {
-                    // ignore
-                }
-            }
-            image = latestImage
+        // 直接从 ImageReader 取最新帧，避免用到遮罩层还在时的旧帧
+        var capturedImage: Image? = null
+        try {
+            capturedImage = imageReader?.acquireLatestImage()
+        } catch (e: Exception) {
+            Log.w(TAG, "acquireLatestImage 异常，回退到缓存帧", e)
         }
 
-        val capturedImage = image
+        // 如果没取到新帧，用缓存的 latestImage
         if (capturedImage == null) {
+            synchronized(imageLock) {
+                capturedImage = latestImage
+                if (capturedImage == null) {
+                    try {
+                        val deadline = System.currentTimeMillis() + 3000
+                        while (latestImage == null && System.currentTimeMillis() < deadline) {
+                            imageLock.wait(16)
+                        }
+                    } catch (e: InterruptedException) {
+                        // ignore
+                    }
+                    capturedImage = latestImage
+                }
+            }
+        }
+
+        val image = capturedImage
+        if (image == null) {
             lastError = "失败: 3秒内未收到任何图像帧（已收到 $frameReceivedCount 帧，VirtualDisplay可能未正常工作）"
             lastCaptureSuccess = false
             Log.e(TAG, "截屏失败: 3秒内未获取到任何图像帧")
@@ -296,8 +307,8 @@ class ScreenCaptureService : Service() {
         }
 
         return try {
-            Log.d(TAG, "截取图像: ${capturedImage.width}x${capturedImage.height} (期望 ${screenWidth}x${screenHeight})")
-            val bitmap = imageToBitmap(capturedImage)
+            Log.d(TAG, "截取图像: ${image.width}x${image.height} (期望 ${screenWidth}x${screenHeight})")
+            val bitmap = imageToBitmap(image)
             if (bitmap == null) {
                 lastError = "失败: Image 转 Bitmap 失败"
                 lastCaptureSuccess = false
