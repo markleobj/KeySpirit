@@ -53,6 +53,10 @@ class FloatingWindowService : Service() {
     private var recordingOverlay: View? = null
     private var pickerOverlay: View? = null  // 坐标/区域选取的全屏悬浮层
 
+    // 找图两步选取：第一步搜索区域，第二步目标图片区域
+    private var findImageSearchRegion: IntArray? = null
+    private var findImageExistingStep: com.keyspirit.script.ScriptStep? = null
+
     private var isPanelVisible = false
     private var isRecording = false
     private var isExecuting = false
@@ -581,10 +585,29 @@ class FloatingWindowService : Service() {
                             floatingBall?.visibility = View.VISIBLE
                             toast("区域太小，请重新选择")
                             openEditor()
+                            findImageSearchRegion = null
+                            findImageExistingStep = null
                             return true
                         }
-                        // 不恢复悬浮球可见性，captureRegionAndSave 会先截图再恢复
-                        captureRegionAndSave(left, top, right, bottom, existingStep)
+
+                        val searchRegion = findImageSearchRegion
+                        if (searchRegion == null) {
+                            // 第一步：搜索区域已选，进入第二步选择目标图片
+                            findImageSearchRegion = intArrayOf(left, top, right, bottom)
+                            findImageExistingStep = existingStep
+                            showPickerToast("搜索区域已选，请框选要找的目标图片")
+                            // 重新显示选取层，让用户画目标图片区域
+                            startRegionPickForFindImage(existingStep)
+                        } else {
+                            // 第二步：目标图片区域，截图保存
+                            captureRegionAndSave(
+                                searchRegion[0], searchRegion[1], searchRegion[2], searchRegion[3],
+                                left, top, right, bottom,
+                                findImageExistingStep
+                            )
+                            findImageSearchRegion = null
+                            findImageExistingStep = null
+                        }
                     }
                 }
                 return true
@@ -614,13 +637,22 @@ class FloatingWindowService : Service() {
             return
         }
         pickerOverlay = overlay
-        showPickerToast("拖动框选找图区域，松开后自动截图")
+        if (findImageSearchRegion == null) {
+            showPickerToast("第1步：框选搜索区域（在哪里找）")
+        } else {
+            showPickerToast("第2步：框选目标图片（找什么）")
+        }
     }
 
     /**
-     * 截取指定区域并保存为找图目标图片
+     * 截取目标区域并保存为找图目标图片。
+     * 搜索区域用于 findImage 时限定搜索范围，目标区域用于截图保存为模板。
      */
-    private fun captureRegionAndSave(left: Int, top: Int, right: Int, bottom: Int, existingStep: ScriptStep?) {
+    private fun captureRegionAndSave(
+        searchLeft: Int, searchTop: Int, searchRight: Int, searchBottom: Int,
+        targetLeft: Int, targetTop: Int, targetRight: Int, targetBottom: Int,
+        existingStep: ScriptStep?
+    ) {
         try {
             val service = ScreenCaptureService.instance
             if (service == null) {
@@ -639,16 +671,13 @@ class FloatingWindowService : Service() {
                 ) { openEditor() }
                 return
             }
-            // 在主线程先获取 script 引用，避免后台线程访问 editingScript 的竞态
             val script = ensureEditingScript()
-            // 截图前隐藏所有悬浮元素
             floatingBall?.visibility = View.GONE
             toast("正在截图...")
-            Log.d(TAG, "captureRegionAndSave: region=($left,$top)-($right,$bottom), script=${script.name}, steps=${script.steps.size}")
+            Log.d(TAG, "captureRegionAndSave: search=($searchLeft,$searchTop)-($searchRight,$searchBottom), target=($targetLeft,$targetTop)-($targetRight,$targetBottom)")
 
             Thread {
                 try {
-                    // 等屏幕刷新（遮罩层和悬浮球移除后）
                     Thread.sleep(400)
 
                     val bitmap = service.captureScreen()
@@ -665,15 +694,14 @@ class FloatingWindowService : Service() {
                         return@Thread
                     }
                     Log.d(TAG, "captureRegionAndSave: bitmap=${bitmap.width}x${bitmap.height}")
-                    // 裁剪区域
-                    val cropLeft = left.coerceIn(0, bitmap.width - 1)
-                    val cropTop = top.coerceIn(0, bitmap.height - 1)
-                    val cropRight = right.coerceIn(cropLeft + 1, bitmap.width)
-                    val cropBottom = bottom.coerceIn(cropTop + 1, bitmap.height)
+                    // 只裁剪目标区域（要找的图片），不是整个搜索区域
+                    val cropLeft = targetLeft.coerceIn(0, bitmap.width - 1)
+                    val cropTop = targetTop.coerceIn(0, bitmap.height - 1)
+                    val cropRight = targetRight.coerceIn(cropLeft + 1, bitmap.width)
+                    val cropBottom = targetBottom.coerceIn(cropTop + 1, bitmap.height)
                     val cropped = Bitmap.createBitmap(bitmap, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop)
-                    Log.d(TAG, "captureRegionAndSave: cropped=${cropped.width}x${cropped.height}")
+                    Log.d(TAG, "captureRegionAndSave: target cropped=${cropped.width}x${cropped.height}")
 
-                    // 确保当前脚本已保存（获取 scriptId）
                     if (script.id.isBlank() || scriptManager.getScript(script.id) == null) {
                         script.name = script.name.ifEmpty { "未命名脚本" }
                         scriptManager.saveScript(script)
@@ -685,16 +713,17 @@ class FloatingWindowService : Service() {
                         if (path != null) {
                             val step = existingStep ?: ScriptStep(type = StepType.FIND_IMAGE)
                             step.imagePath = path
-                            step.regionLeft = left
-                            step.regionTop = top
-                            step.regionRight = right
-                            step.regionBottom = bottom
+                            // 搜索区域用于限定找图范围
+                            step.regionLeft = searchLeft
+                            step.regionTop = searchTop
+                            step.regionRight = searchRight
+                            step.regionBottom = searchBottom
                             step.useRegion = true
                             if (existingStep == null) {
                                 script.steps.add(step)
                                 Log.d(TAG, "Added FIND_IMAGE step, total steps=${script.steps.size}")
                             }
-                            toast("✓ 已截图并保存 (${cropped.width}x${cropped.height})")
+                            toast("✓ 目标图片已保存 (${cropped.width}x${cropped.height})")
                         } else {
                             toast("图片保存失败")
                         }
