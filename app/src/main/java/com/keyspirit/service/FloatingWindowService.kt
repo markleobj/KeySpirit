@@ -240,12 +240,15 @@ class FloatingWindowService : Service() {
         hidePanel()
         if (editorView != null) return
 
-        // 用当前项目的脚本，没有就新建
-        val scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
-        val script = if (scriptId != null) {
-            scriptManager.getScript(scriptId)
-        } else null
-        editingScript = script ?: Script(name = "新脚本")
+        // 优先复用 editingScript（添加步骤的过程中 closeEditor 不应清空它），
+        // 否则从存储加载当前脚本，没有就新建
+        if (editingScript == null) {
+            val scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
+            val script = if (scriptId != null) {
+                scriptManager.getScript(scriptId)
+            } else null
+            editingScript = script ?: Script(name = "新脚本")
+        }
 
         editorView = com.keyspirit.floating.FloatingEditorView(this).apply {
             setScript(editingScript!!)
@@ -304,7 +307,7 @@ class FloatingWindowService : Service() {
     private fun closeEditor() {
         editorView?.let { windowManager.removeView(it) }
         editorView = null
-        editingScript = null
+        // 注意：不清空 editingScript，因为添加步骤的回调还需要往里面加步骤
         pendingStepType = null
     }
 
