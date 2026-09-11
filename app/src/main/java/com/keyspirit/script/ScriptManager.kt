@@ -40,6 +40,8 @@ class ScriptManager(private val context: Context) {
                 if (scriptFile.exists()) {
                     try {
                         val script = gson.fromJson(scriptFile.readText(), Script::class.java)
+                        // Gson 可能绕过构造函数导致 steps 为 null，兜底初始化
+                        ensureStepsNotNull(script)
                         scripts.add(script)
                     } catch (e: Exception) {
                         // 忽略损坏的脚本
@@ -68,12 +70,25 @@ class ScriptManager(private val context: Context) {
         val scriptFile = File(getProjectDir(id), "script.json")
         return if (scriptFile.exists()) {
             try {
-                gson.fromJson(scriptFile.readText(), Script::class.java)
+                val script = gson.fromJson(scriptFile.readText(), Script::class.java)
+                // Gson 可能绕过构造函数导致 steps 为 null，兜底初始化
+                ensureStepsNotNull(script)
+                script
             } catch (e: Exception) {
                 null
             }
         } else {
             null
+        }
+    }
+
+    /**
+     * 确保 script.steps 不为 null（Gson 反序列化可能绕过构造函数）
+     */
+    private fun ensureStepsNotNull(script: Script) {
+        @Suppress("SENSELESS_COMPARISON")
+        if (script.steps == null) {
+            script.steps = mutableListOf()
         }
     }
 

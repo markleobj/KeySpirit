@@ -186,7 +186,7 @@ class FloatingWindowService : Service() {
 
     private fun hidePanel() {
         floatingPanel?.let {
-            windowManager.removeView(it)
+            try { windowManager.removeView(it) } catch (_: Exception) {}
         }
         floatingPanel = null
         isPanelVisible = false
@@ -236,12 +236,10 @@ class FloatingWindowService : Service() {
     // 待添加的步骤类型（交互式选取完成后回填）
     private var pendingStepType: StepType? = null
 
-    private fun openEditor() {
-        hidePanel()
-        if (editorView != null) return
-
-        // 优先复用 editingScript（添加步骤的过程中 closeEditor 不应清空它），
-        // 否则从存储加载当前脚本，没有就新建
+    /**
+     * 确保 editingScript 存在且 steps 不为 null
+     */
+    private fun ensureEditingScript(): Script {
         if (editingScript == null) {
             val scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
             val script = if (scriptId != null) {
@@ -249,9 +247,28 @@ class FloatingWindowService : Service() {
             } else null
             editingScript = script ?: Script(name = "新脚本")
         }
+        val s = editingScript!!
+        // 兜底：Gson 反序列化可能导致 steps 运行时为 null
+        @Suppress("SENSELESS_COMPARISON")
+        if (s.steps == null) {
+            s.steps = mutableListOf()
+        }
+        return s
+    }
+
+    private fun openEditor() {
+        hidePanel()
+        // 如果 editorView 还在（例如 closeEditor 抛异常导致没清掉），先强制移除
+        editorView?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+            editorView = null
+        }
+
+        val script = ensureEditingScript()
+        Log.d(TAG, "openEditor: script=${script.name}, steps=${script.steps.size}")
 
         editorView = com.keyspirit.floating.FloatingEditorView(this).apply {
-            setScript(editingScript!!)
+            setScript(script)
             listener = object : com.keyspirit.floating.FloatingEditorView.EditorListener {
                 override fun onAddStep(type: StepType) {
                     handleAddStep(type)
@@ -269,11 +286,11 @@ class FloatingWindowService : Service() {
                     }
                 }
                 override fun onDeleteStep(position: Int) {
-                    editingScript?.steps?.removeAt(position)
+                    ensureEditingScript().steps.removeAt(position)
                     editorView?.refreshStepList()
                 }
                 override fun onSave() {
-                    editingScript?.let {
+                    ensureEditingScript().let {
                         it.name = it.name.ifEmpty { "未命名脚本" }
                         scriptManager.saveScript(it)
                         com.keyspirit.util.CurrentProjectHolder.currentScriptId = it.id
@@ -282,7 +299,7 @@ class FloatingWindowService : Service() {
                     }
                 }
                 override fun onRun() {
-                    editingScript?.let {
+                    ensureEditingScript().let {
                         it.name = it.name.ifEmpty { "未命名脚本" }
                         scriptManager.saveScript(it)
                         startExecution(it)
@@ -305,17 +322,21 @@ class FloatingWindowService : Service() {
     }
 
     private fun closeEditor() {
-        editorView?.let { windowManager.removeView(it) }
+        editorView?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+        }
         editorView = null
         // 注意：不清空 editingScript，因为添加步骤的回调还需要往里面加步骤
-        pendingStepType = null
+        // pendingStepType 保留，供 picker 完成后读取步骤类型
     }
 
     /**
      * 保存当前脚本（悬浮编辑器中的脚本 或 CurrentProjectHolder 中的当前脚本）
      */
     private fun saveCurrentScript() {
-        val script = editingScript ?: run {
+        val script = if (editingScript != null) {
+            ensureEditingScript()
+        } else {
             val id = com.keyspirit.util.CurrentProjectHolder.currentScriptId
             if (id != null) scriptManager.getScript(id) else null
         }
@@ -335,6 +356,8 @@ class FloatingWindowService : Service() {
      */
     private fun handleAddStep(type: StepType) {
         pendingStepType = type
+        val script = ensureEditingScript()
+        Log.d(TAG, "handleAddStep: type=$type, current steps=${script.steps.size}")
         when (type) {
             StepType.CLICK, StepType.LONG_PRESS -> startCoordinatePickForStep(null)
             StepType.FIND_IMAGE -> startRegionPickForFindImage(null)
@@ -343,7 +366,7 @@ class FloatingWindowService : Service() {
             StepType.DELAY -> showDelayDialog(null)
             else -> {
                 // 其他类型直接添加空步骤
-                editingScript?.steps?.add(ScriptStep(type = type))
+                script.steps.add(ScriptStep(type = type))
                 editorView?.refreshStepList()
             }
         }
@@ -373,8 +396,10 @@ class FloatingWindowService : Service() {
                         val step = existingStep ?: ScriptStep(type = type)
                         step.x = x
                         step.y = y
+                        val script = ensureEditingScript()
                         if (existingStep == null) {
-                            editingScript?.steps?.add(step)
+                            script.steps.add(step)
+                            Log.d(TAG, "Added CLICK step at ($x, $y), total steps=${script.steps.size}")
                         }
                         openEditor()
                         toast("已设置坐标: ($x, $y)")
@@ -430,8 +455,10 @@ class FloatingWindowService : Service() {
                             swipeStep?.y2 = y
                             removePickerOverlay()
                             floatingBall?.visibility = View.VISIBLE
+                            val script = ensureEditingScript()
                             if (existingStep == null) {
-                                editingScript?.steps?.add(swipeStep!!)
+                                script.steps.add(swipeStep!!)
+                                Log.d(TAG, "Added SWIPE step, total steps=${script.steps.size}")
                             }
                             swipeStep = null
                             openEditor()
@@ -552,6 +579,8 @@ class FloatingWindowService : Service() {
             openEditor()
             return
         }
+        // 在主线程先获取 script 引用，避免后台线程访问 editingScript 的竞态
+        val script = ensureEditingScript()
         // 截图前隐藏悬浮球，避免被截进去
         floatingBall?.visibility = View.GONE
         Thread {
@@ -575,13 +604,6 @@ class FloatingWindowService : Service() {
             val cropped = Bitmap.createBitmap(bitmap, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop)
 
             // 确保当前脚本已保存（获取 scriptId）
-            val script = editingScript ?: run {
-                handler.post {
-                    floatingBall?.visibility = View.VISIBLE
-                    openEditor()
-                }
-                return@Thread
-            }
             if (script.id.isBlank() || scriptManager.getScript(script.id) == null) {
                 script.name = script.name.ifEmpty { "未命名脚本" }
                 scriptManager.saveScript(script)
@@ -599,7 +621,8 @@ class FloatingWindowService : Service() {
                     step.regionBottom = bottom
                     step.useRegion = true
                     if (existingStep == null) {
-                        editingScript?.steps?.add(step)
+                        script.steps.add(step)
+                        Log.d(TAG, "Added FIND_IMAGE step, total steps=${script.steps.size}")
                     }
                     toast("已截取目标图片并设置区域 (${cropped.width}x${cropped.height})")
                 } else {
@@ -702,6 +725,7 @@ class FloatingWindowService : Service() {
             .setPositiveButton("确定") { _, _ ->
                 val text = input.text.toString()
                 if (text.isNotEmpty()) {
+                    val script = ensureEditingScript()
                     val step = existingStep ?: ScriptStep(type = StepType.FIND_TEXT)
                     step.text = text
                     step.regionLeft = left
@@ -710,7 +734,8 @@ class FloatingWindowService : Service() {
                     step.regionBottom = bottom
                     step.useRegion = true
                     if (existingStep == null) {
-                        editingScript?.steps?.add(step)
+                        script.steps.add(step)
+                        Log.d(TAG, "Added FIND_TEXT step, total steps=${script.steps.size}")
                     }
                 }
                 openEditor()
@@ -735,10 +760,12 @@ class FloatingWindowService : Service() {
             .setView(input)
             .setPositiveButton("确定") { _, _ ->
                 val ms = input.text.toString().toLongOrNull() ?: 500
+                val script = ensureEditingScript()
                 val step = existingStep ?: ScriptStep(type = StepType.DELAY)
                 step.delay = ms
                 if (existingStep == null) {
-                    editingScript?.steps?.add(step)
+                    script.steps.add(step)
+                    Log.d(TAG, "Added DELAY step, total steps=${script.steps.size}")
                 }
                 editorView?.refreshStepList()
             }
@@ -818,7 +845,7 @@ class FloatingWindowService : Service() {
 
     private fun hideRecordingOverlay() {
         recordingOverlay?.let {
-            windowManager.removeView(it)
+            try { windowManager.removeView(it) } catch (_: Exception) {}
         }
         recordingOverlay = null
     }
@@ -1276,7 +1303,13 @@ class FloatingWindowService : Service() {
             try { windowManager.removeView(it) } catch (_: Exception) {}
         }
         pickerToastView = null
-        floatingBall?.let { windowManager.removeView(it) }
+        editorView?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+        }
+        editorView = null
+        floatingBall?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+        }
         floatingBall = null
     }
 
