@@ -137,9 +137,10 @@ class ScriptExecutor(
                 performClick(service, step.x, step.y)
                 true
             }
-            StepType.LEFT_CLICK_UP -> {
-                // 左键抬起 = 快速点击释放
-                performClick(service, step.x, step.y)
+            StepType.RIGHT_CLICK -> {
+                // 右键点击 = 长按一次（模拟很多游戏的右键）
+                val pressDuration = if (step.duration > 0) step.duration else 300L
+                performTouchDown(service, step.x, step.y, pressDuration)
                 true
             }
             StepType.RIGHT_CLICK_DOWN -> {

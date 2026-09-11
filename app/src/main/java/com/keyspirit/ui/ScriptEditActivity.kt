@@ -140,10 +140,12 @@ class ScriptEditActivity : AppCompatActivity() {
         val inputs = mutableMapOf<String, EditText>()
         when (step.type) {
             StepType.CLICK, StepType.TOUCH_DOWN, StepType.TOUCH_UP,
-            StepType.LEFT_CLICK_UP, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP -> {
+            StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP -> {
                 inputs["x"] = addInput(layout, "X 坐标", step.x.toString())
                 inputs["y"] = addInput(layout, "Y 坐标", step.y.toString())
-                if (step.type == StepType.TOUCH_DOWN || step.type == StepType.LONG_PRESS || step.type == StepType.RIGHT_CLICK_DOWN) {
+                if (step.type == StepType.TOUCH_DOWN || step.type == StepType.LONG_PRESS
+                    || step.type == StepType.RIGHT_CLICK_DOWN || step.type == StepType.RIGHT_CLICK
+                ) {
                     inputs["duration"] = addInput(layout, "持续时间(ms)", step.duration.toString())
                 }
                 addCoordinatePickerButton(layout, inputs["x"]!!, inputs["y"]!!)

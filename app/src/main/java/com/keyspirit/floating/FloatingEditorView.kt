@@ -184,14 +184,16 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
     private fun showStepTypeMenu() {
         val types = arrayOf(
             StepType.CLICK,
-            StepType.LEFT_CLICK_UP,
+            StepType.TOUCH_DOWN,
+            StepType.TOUCH_UP,
+            StepType.RIGHT_CLICK,
             StepType.RIGHT_CLICK_DOWN,
             StepType.RIGHT_CLICK_UP,
-            StepType.FIND_IMAGE,
-            StepType.FIND_TEXT,
             StepType.SWIPE,
             StepType.LONG_PRESS,
-            StepType.DELAY
+            StepType.DELAY,
+            StepType.FIND_IMAGE,
+            StepType.FIND_TEXT
         )
         val names = types.map { it.displayName }.toTypedArray()
         val dialog = android.app.AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog)

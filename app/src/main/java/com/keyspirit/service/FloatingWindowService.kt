@@ -278,7 +278,8 @@ class FloatingWindowService : Service() {
                     pendingStepType = step.type
                     when (step.type) {
                         StepType.CLICK, StepType.LONG_PRESS,
-                        StepType.LEFT_CLICK_UP, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP -> startCoordinatePickForStep(step)
+                        StepType.TOUCH_DOWN, StepType.TOUCH_UP,
+                        StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP -> startCoordinatePickForStep(step)
                         StepType.FIND_IMAGE -> startRegionPickForFindImage(step)
                         StepType.FIND_TEXT -> startRegionPickForFindText(step)
                         StepType.SWIPE -> startSwipePickForStep(step)
@@ -361,7 +362,8 @@ class FloatingWindowService : Service() {
         Log.d(TAG, "handleAddStep: type=$type, current steps=${script.steps.size}")
         when (type) {
             StepType.CLICK, StepType.LONG_PRESS,
-            StepType.LEFT_CLICK_UP, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP -> startCoordinatePickForStep(null)
+            StepType.TOUCH_DOWN, StepType.TOUCH_UP,
+            StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP -> startCoordinatePickForStep(null)
             StepType.FIND_IMAGE -> startRegionPickForFindImage(null)
             StepType.FIND_TEXT -> startRegionPickForFindText(null)
             StepType.SWIPE -> startSwipePickForStep(null)
@@ -396,9 +398,12 @@ class FloatingWindowService : Service() {
                         floatingBall?.visibility = View.VISIBLE
                         val type = pendingStepType ?: StepType.CLICK
                         val step = existingStep ?: ScriptStep(type = type).apply {
-                            // 右键按下默认 300ms 持续时间
-                            if (type == StepType.RIGHT_CLICK_DOWN) {
-                                duration = 300
+                            // 需要按住的步骤默认持续时间
+                            when (type) {
+                                StepType.TOUCH_DOWN -> duration = 10000 // 按住不放
+                                StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN -> duration = 300
+                                StepType.LONG_PRESS -> duration = 500
+                                else -> {}
                             }
                         }
                         step.x = x
@@ -494,6 +499,15 @@ class FloatingWindowService : Service() {
      * 区域选取模式，用于找图步骤：选区域后自动截图该区域并保存为目标图片
      */
     private fun startRegionPickForFindImage(existingStep: ScriptStep?) {
+        // 预检查：截屏服务必须运行
+        if (!com.keyspirit.service.ScreenCaptureService.isRunning()) {
+            showAlertDialog(
+                title = "截屏服务未启动",
+                message = "找图功能需要截屏权限。请返回主界面，点击\"开始录制\"按钮授权截屏权限后再试。",
+                positive = "知道了"
+            ) { openEditor() }
+            return
+        }
         closeEditor()
         floatingBall?.visibility = View.GONE
         com.keyspirit.util.RegionResultHolder.hasNewResult = false
@@ -543,7 +557,7 @@ class FloatingWindowService : Service() {
                         val right = Math.max(startX, event.rawX).toInt()
                         val bottom = Math.max(startY, event.rawY).toInt()
                         dragging = false
-                        removePickerOverlay()
+                        try { windowManager.removeView(this) } catch (_: Exception) {}
 
                         if (right - left < 20 || bottom - top < 20) {
                             floatingBall?.visibility = View.VISIBLE
@@ -572,7 +586,15 @@ class FloatingWindowService : Service() {
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         )
-        windowManager.addView(overlay, params)
+        try {
+            windowManager.addView(overlay, params)
+        } catch (e: Exception) {
+            Log.e(TAG, "startRegionPickForFindImage: addView failed", e)
+            floatingBall?.visibility = View.VISIBLE
+            toast("无法创建选取层: ${e.message}")
+            openEditor()
+            return
+        }
         pickerOverlay = overlay
         showPickerToast("拖动框选找图区域，松开后自动截图")
     }
@@ -581,70 +603,94 @@ class FloatingWindowService : Service() {
      * 截取指定区域并保存为找图目标图片
      */
     private fun captureRegionAndSave(left: Int, top: Int, right: Int, bottom: Int, existingStep: ScriptStep?) {
-        val service = ScreenCaptureService.instance
-        if (service == null) {
-            Log.e(TAG, "captureRegionAndSave: ScreenCaptureService.instance is null")
-            toast("截屏服务未启动，请在主界面授权截屏权限后再试")
-            openEditor()
-            return
-        }
-        // 在主线程先获取 script 引用，避免后台线程访问 editingScript 的竞态
-        val script = ensureEditingScript()
-        // 截图前隐藏所有悬浮元素
-        floatingBall?.visibility = View.GONE
-        toast("正在截图...")
-        Log.d(TAG, "captureRegionAndSave: region=($left,$top)-($right,$bottom), script=${script.name}")
-        Thread {
-            // 等屏幕刷新（遮罩层和悬浮球移除后）
-            try { Thread.sleep(300) } catch (_: InterruptedException) {}
-
-            val bitmap = service.captureScreen()
-            if (bitmap == null) {
-                Log.e(TAG, "captureRegionAndSave: captureScreen returned null")
-                handler.post {
-                    floatingBall?.visibility = View.VISIBLE
-                    toast("截屏失败，请确保已授权截屏权限")
-                    openEditor()
-                }
-                return@Thread
-            }
-            Log.d(TAG, "captureRegionAndSave: bitmap=${bitmap.width}x${bitmap.height}")
-            // 裁剪区域
-            val cropLeft = left.coerceIn(0, bitmap.width - 1)
-            val cropTop = top.coerceIn(0, bitmap.height - 1)
-            val cropRight = right.coerceIn(cropLeft + 1, bitmap.width)
-            val cropBottom = bottom.coerceIn(cropTop + 1, bitmap.height)
-            val cropped = Bitmap.createBitmap(bitmap, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop)
-            Log.d(TAG, "captureRegionAndSave: cropped=${cropped.width}x${cropped.height}")
-
-            // 确保当前脚本已保存（获取 scriptId）
-            if (script.id.isBlank() || scriptManager.getScript(script.id) == null) {
-                script.name = script.name.ifEmpty { "未命名脚本" }
-                scriptManager.saveScript(script)
-            }
-
-            val path = com.keyspirit.util.ScreenshotUtils.saveToProject(this@FloatingWindowService, cropped, script.id)
-            handler.post {
+        try {
+            val service = ScreenCaptureService.instance
+            if (service == null) {
+                Log.e(TAG, "captureRegionAndSave: ScreenCaptureService.instance is null")
                 floatingBall?.visibility = View.VISIBLE
-                if (path != null) {
-                    val step = existingStep ?: ScriptStep(type = StepType.FIND_IMAGE)
-                    step.imagePath = path
-                    step.regionLeft = left
-                    step.regionTop = top
-                    step.regionRight = right
-                    step.regionBottom = bottom
-                    step.useRegion = true
-                    if (existingStep == null) {
-                        script.steps.add(step)
-                        Log.d(TAG, "Added FIND_IMAGE step, total steps=${script.steps.size}")
-                    }
-                    toast("已截图并保存 (${cropped.width}x${cropped.height})")
-                } else {
-                    toast("图片保存失败")
-                }
-                openEditor()
+                showAlertDialog(
+                    title = "截屏失败",
+                    message = "截屏服务已断开。请返回主界面，点击\"开始录制\"重新授权截屏权限。",
+                    positive = "好的"
+                ) { openEditor() }
+                return
             }
-        }.start()
+            // 在主线程先获取 script 引用，避免后台线程访问 editingScript 的竞态
+            val script = ensureEditingScript()
+            // 截图前隐藏所有悬浮元素
+            floatingBall?.visibility = View.GONE
+            toast("正在截图...")
+            Log.d(TAG, "captureRegionAndSave: region=($left,$top)-($right,$bottom), script=${script.name}, steps=${script.steps.size}")
+
+            Thread {
+                try {
+                    // 等屏幕刷新（遮罩层和悬浮球移除后）
+                    Thread.sleep(400)
+
+                    val bitmap = service.captureScreen()
+                    if (bitmap == null) {
+                        Log.e(TAG, "captureRegionAndSave: captureScreen returned null")
+                        handler.post {
+                            floatingBall?.visibility = View.VISIBLE
+                            showAlertDialog(
+                                title = "截屏失败",
+                                message = "无法获取屏幕截图。请确认：\n1. 截屏权限已授予\n2. 授权后未重启应用\n3. 悬浮球和遮罩层已移除",
+                                positive = "好的"
+                            ) { openEditor() }
+                        }
+                        return@Thread
+                    }
+                    Log.d(TAG, "captureRegionAndSave: bitmap=${bitmap.width}x${bitmap.height}")
+                    // 裁剪区域
+                    val cropLeft = left.coerceIn(0, bitmap.width - 1)
+                    val cropTop = top.coerceIn(0, bitmap.height - 1)
+                    val cropRight = right.coerceIn(cropLeft + 1, bitmap.width)
+                    val cropBottom = bottom.coerceIn(cropTop + 1, bitmap.height)
+                    val cropped = Bitmap.createBitmap(bitmap, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop)
+                    Log.d(TAG, "captureRegionAndSave: cropped=${cropped.width}x${cropped.height}")
+
+                    // 确保当前脚本已保存（获取 scriptId）
+                    if (script.id.isBlank() || scriptManager.getScript(script.id) == null) {
+                        script.name = script.name.ifEmpty { "未命名脚本" }
+                        scriptManager.saveScript(script)
+                    }
+
+                    val path = com.keyspirit.util.ScreenshotUtils.saveToProject(this@FloatingWindowService, cropped, script.id)
+                    handler.post {
+                        floatingBall?.visibility = View.VISIBLE
+                        if (path != null) {
+                            val step = existingStep ?: ScriptStep(type = StepType.FIND_IMAGE)
+                            step.imagePath = path
+                            step.regionLeft = left
+                            step.regionTop = top
+                            step.regionRight = right
+                            step.regionBottom = bottom
+                            step.useRegion = true
+                            if (existingStep == null) {
+                                script.steps.add(step)
+                                Log.d(TAG, "Added FIND_IMAGE step, total steps=${script.steps.size}")
+                            }
+                            toast("✓ 已截图并保存 (${cropped.width}x${cropped.height})")
+                        } else {
+                            toast("图片保存失败")
+                        }
+                        openEditor()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "captureRegionAndSave background error", e)
+                    handler.post {
+                        floatingBall?.visibility = View.VISIBLE
+                        toast("截图出错: ${e.message}")
+                        openEditor()
+                    }
+                }
+            }.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "captureRegionAndSave error", e)
+            floatingBall?.visibility = View.VISIBLE
+            toast("截图出错: ${e.message}")
+            openEditor()
+        }
     }
 
     /**
@@ -1330,6 +1376,36 @@ class FloatingWindowService : Service() {
     private fun toast(msg: String, long: Boolean = false) {
         handler.post {
             android.widget.Toast.makeText(this, msg, if (long) android.widget.Toast.LENGTH_LONG else android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * 通用 AlertDialog，从 Service 上下文弹出（自动设置 TYPE_APPLICATION_OVERLAY）
+     */
+    private fun showAlertDialog(
+        title: String,
+        message: String,
+        positive: String = "确定",
+        onPositive: (() -> Unit)? = null,
+        negative: String? = null,
+        onNegative: (() -> Unit)? = null
+    ) {
+        handler.post {
+            android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton(positive) { _, _ -> onPositive?.invoke() }
+                .apply {
+                    if (negative != null) {
+                        setNegativeButton(negative) { _, _ -> onNegative?.invoke() }
+                    }
+                }
+                .create()
+                .apply {
+                    window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                    setCancelable(false)
+                }
+                .show()
         }
     }
 

@@ -28,7 +28,7 @@ object JsEngine {
                 StepType.CLICK -> sb.appendLine("click(${step.x}, ${step.y});")
                 StepType.TOUCH_DOWN -> sb.appendLine("touchDown(${step.x}, ${step.y}, ${step.duration});")
                 StepType.TOUCH_UP -> sb.appendLine("touchUp(${step.x}, ${step.y});")
-                StepType.LEFT_CLICK_UP -> sb.appendLine("leftClickUp(${step.x}, ${step.y});")
+                StepType.RIGHT_CLICK -> sb.appendLine("rightClick(${step.x}, ${step.y}, ${step.duration});")
                 StepType.RIGHT_CLICK_DOWN -> sb.appendLine("rightClickDown(${step.x}, ${step.y}, ${step.duration});")
                 StepType.RIGHT_CLICK_UP -> sb.appendLine("rightClickUp(${step.x}, ${step.y});")
                 StepType.SWIPE -> sb.appendLine("swipe(${step.x1}, ${step.y1}, ${step.x2}, ${step.y2}, ${step.duration});")

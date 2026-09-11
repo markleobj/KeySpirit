@@ -38,10 +38,10 @@ data class ScriptStep(
 ) {
     fun getDescription(): String {
         return when (type) {
-            StepType.CLICK -> "点击 ($x, $y)"
-            StepType.TOUCH_DOWN -> "按下 ($x, $y)"
-            StepType.TOUCH_UP -> "抬起 ($x, $y)"
-            StepType.LEFT_CLICK_UP -> "左键抬起 ($x, $y)"
+            StepType.CLICK -> "左键点击 ($x, $y)"
+            StepType.TOUCH_DOWN -> "左键按下 ($x, $y)"
+            StepType.TOUCH_UP -> "左键抬起 ($x, $y)"
+            StepType.RIGHT_CLICK -> "右键点击 ($x, $y) ${duration}ms"
             StepType.RIGHT_CLICK_DOWN -> "右键按下 ($x, $y) ${duration}ms"
             StepType.RIGHT_CLICK_UP -> "右键抬起 ($x, $y)"
             StepType.SWIPE -> "($x1,$y1) → ($x2,$y2) ${duration}ms"
