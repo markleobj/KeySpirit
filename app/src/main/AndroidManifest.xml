@@ -92,7 +92,11 @@
         <service
             android:name=".service.ScreenCaptureService"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+            android:foregroundServiceType="mediaProjection|specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Screen capture for image/text recognition in automation scripts" />
+        </service>
 
     </application>
 

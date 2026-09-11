@@ -112,35 +112,45 @@ class ScreenCaptureService : Service() {
         @Suppress("DEPRECATION")
         val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
 
+        // Android 14+ 必须在 5 秒内调用 startForeground，否则崩溃。
+        // 所以无论成功失败，都先想办法调到 startForeground，再决定是否 stopSelf。
         if (resultCode == 0 || data == null) {
             Log.e(TAG, "onStartCommand 缺少截屏授权数据 (resultCode=$resultCode)")
+            startForegroundFallback("截屏授权数据缺失，服务未启动")
             stopSelf()
             return START_NOT_STICKY
         }
 
         // 第一步：创建 MediaProjection 对象（Android 14 要求 mediaProjection 前台服务启动前必须已有 MediaProjection）
+        var projectionOk = false
         try {
             createMediaProjection(resultCode, data)
+            projectionOk = mediaProjection != null
         } catch (e: Exception) {
             Log.e(TAG, "createMediaProjection 失败", e)
-            stopSelf()
-            return START_NOT_STICKY
         }
 
         // 第二步：立即启动前台服务（必须在 onStartCommand 5秒内调用）
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    createNotification(),
+                val type = if (projectionOk) {
                     android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-                )
+                } else {
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                }
+                startForeground(NOTIFICATION_ID, createNotification(), type)
             } else {
                 startForeground(NOTIFICATION_ID, createNotification())
             }
-            Log.d(TAG, "前台服务已启动")
+            Log.d(TAG, "前台服务已启动 (projectionOk=$projectionOk)")
         } catch (e: Exception) {
             Log.e(TAG, "startForeground 失败", e)
+        }
+
+        if (!projectionOk) {
+            Log.e(TAG, "MediaProjection 创建失败，停止服务")
+            stopSelf()
+            return START_NOT_STICKY
         }
 
         // 第三步：服务成为前台后，再创建 VirtualDisplay（避免在非前台状态创建导致崩溃）
@@ -151,6 +161,26 @@ class ScreenCaptureService : Service() {
         }
 
         return START_NOT_STICKY
+    }
+
+    /**
+     * 当 MediaProjection 不可用时，用 specialUse 类型启动前台服务，避免 Android 14 崩溃。
+     */
+    private fun startForegroundFallback(reason: String) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    createNotification(),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification())
+            }
+            Log.w(TAG, "已用 specialUse 类型启动前台服务（兜底）: $reason")
+        } catch (e: Exception) {
+            Log.e(TAG, "startForegroundFallback 失败", e)
+        }
     }
 
     private fun createNotification(): Notification {
