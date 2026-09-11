@@ -461,57 +461,70 @@ class FloatingWindowService : Service() {
         floatingBall?.visibility = View.GONE
         com.keyspirit.util.RegionResultHolder.hasNewResult = false
 
-        var startX = 0f
-        var startY = 0f
-        var regionView: View? = null
+        val overlay = object : View(this) {
+            private var startX = 0f
+            private var startY = 0f
+            private var curX = 0f
+            private var curY = 0f
+            private var dragging = false
+            private val dashPaint = android.graphics.Paint().apply {
+                color = android.graphics.Color.parseColor("#00BFFF")
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = 6f
+                pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 12f), 0f)
+            }
 
-        // 用 FrameLayout 作为 overlay，regionView 作为子视图，保证坐标一致
-        val overlay = android.widget.FrameLayout(this).apply {
-            setBackgroundColor(0x33000000)
-            setOnTouchListener { _, event ->
+            override fun onDraw(canvas: android.graphics.Canvas) {
+                super.onDraw(canvas)
+                if (dragging) {
+                    val left = Math.min(startX, curX)
+                    val top = Math.min(startY, curY)
+                    val right = Math.max(startX, curX)
+                    val bottom = Math.max(startY, curY)
+                    canvas.drawRect(left, top, right, bottom, dashPaint)
+                }
+            }
+
+            override fun onTouchEvent(event: MotionEvent): Boolean {
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         startX = event.rawX
                         startY = event.rawY
-                        regionView = View(this@FloatingWindowService).apply {
-                            background = createDashedBorder()
-                        }
-                        val lp = android.widget.FrameLayout.LayoutParams(0, 0)
-                        lp.leftMargin = startX.toInt()
-                        lp.topMargin = startY.toInt()
-                        addView(regionView, lp)
+                        curX = event.rawX
+                        curY = event.rawY
+                        dragging = true
+                        invalidate()
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        val rv = regionView ?: return@setOnTouchListener true
-                        val lp = rv.layoutParams as android.widget.FrameLayout.LayoutParams
-                        lp.leftMargin = Math.min(startX, event.rawX).toInt()
-                        lp.topMargin = Math.min(startY, event.rawY).toInt()
-                        lp.width = Math.abs(event.rawX - startX).toInt()
-                        lp.height = Math.abs(event.rawY - startY).toInt()
-                        rv.layoutParams = lp
+                        curX = event.rawX
+                        curY = event.rawY
+                        invalidate()
                     }
                     MotionEvent.ACTION_UP -> {
                         val left = Math.min(startX, event.rawX).toInt()
                         val top = Math.min(startY, event.rawY).toInt()
                         val right = Math.max(startX, event.rawX).toInt()
                         val bottom = Math.max(startY, event.rawY).toInt()
-                        regionView?.let { removeView(it) }
+                        dragging = false
                         removePickerOverlay()
                         floatingBall?.visibility = View.VISIBLE
 
                         if (right - left < 20 || bottom - top < 20) {
                             toast("区域太小，请重新选择")
                             openEditor()
-                            return@setOnTouchListener true
+                            return true
                         }
-
-                        // 截取该区域的图片并保存
                         captureRegionAndSave(left, top, right, bottom, existingStep)
                     }
                 }
-                true
+                return true
+            }
+
+            init {
+                setBackgroundColor(0x33000000)
             }
         }
+
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -601,40 +614,51 @@ class FloatingWindowService : Service() {
         closeEditor()
         floatingBall?.visibility = View.GONE
 
-        var startX = 0f
-        var startY = 0f
-        var regionView: View? = null
+        val overlay = object : View(this) {
+            private var startX = 0f
+            private var startY = 0f
+            private var curX = 0f
+            private var curY = 0f
+            private var dragging = false
+            private val dashPaint = android.graphics.Paint().apply {
+                color = android.graphics.Color.parseColor("#00BFFF")
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = 6f
+                pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 12f), 0f)
+            }
 
-        val overlay = android.widget.FrameLayout(this).apply {
-            setBackgroundColor(0x33000000)
-            setOnTouchListener { _, event ->
+            override fun onDraw(canvas: android.graphics.Canvas) {
+                super.onDraw(canvas)
+                if (dragging) {
+                    val left = Math.min(startX, curX)
+                    val top = Math.min(startY, curY)
+                    val right = Math.max(startX, curX)
+                    val bottom = Math.max(startY, curY)
+                    canvas.drawRect(left, top, right, bottom, dashPaint)
+                }
+            }
+
+            override fun onTouchEvent(event: MotionEvent): Boolean {
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         startX = event.rawX
                         startY = event.rawY
-                        regionView = View(this@FloatingWindowService).apply {
-                            background = createDashedBorder()
-                        }
-                        val lp = android.widget.FrameLayout.LayoutParams(0, 0)
-                        lp.leftMargin = startX.toInt()
-                        lp.topMargin = startY.toInt()
-                        addView(regionView, lp)
+                        curX = event.rawX
+                        curY = event.rawY
+                        dragging = true
+                        invalidate()
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        val rv = regionView ?: return@setOnTouchListener true
-                        val lp = rv.layoutParams as android.widget.FrameLayout.LayoutParams
-                        lp.leftMargin = Math.min(startX, event.rawX).toInt()
-                        lp.topMargin = Math.min(startY, event.rawY).toInt()
-                        lp.width = Math.abs(event.rawX - startX).toInt()
-                        lp.height = Math.abs(event.rawY - startY).toInt()
-                        rv.layoutParams = lp
+                        curX = event.rawX
+                        curY = event.rawY
+                        invalidate()
                     }
                     MotionEvent.ACTION_UP -> {
                         val left = Math.min(startX, event.rawX).toInt()
                         val top = Math.min(startY, event.rawY).toInt()
                         val right = Math.max(startX, event.rawX).toInt()
                         val bottom = Math.max(startY, event.rawY).toInt()
-                        regionView?.let { removeView(it) }
+                        dragging = false
                         removePickerOverlay()
                         floatingBall?.visibility = View.VISIBLE
 
@@ -642,9 +666,14 @@ class FloatingWindowService : Service() {
                         showFindTextDialog(left, top, right, bottom, existingStep)
                     }
                 }
-                true
+                return true
+            }
+
+            init {
+                setBackgroundColor(0x33000000)
             }
         }
+
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
