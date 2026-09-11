@@ -277,7 +277,8 @@ class FloatingWindowService : Service() {
                     // 编辑步骤：根据类型重新交互式设置
                     pendingStepType = step.type
                     when (step.type) {
-                        StepType.CLICK, StepType.LONG_PRESS -> startCoordinatePickForStep(step)
+                        StepType.CLICK, StepType.LONG_PRESS,
+                        StepType.LEFT_CLICK_UP, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP -> startCoordinatePickForStep(step)
                         StepType.FIND_IMAGE -> startRegionPickForFindImage(step)
                         StepType.FIND_TEXT -> startRegionPickForFindText(step)
                         StepType.SWIPE -> startSwipePickForStep(step)
@@ -359,7 +360,8 @@ class FloatingWindowService : Service() {
         val script = ensureEditingScript()
         Log.d(TAG, "handleAddStep: type=$type, current steps=${script.steps.size}")
         when (type) {
-            StepType.CLICK, StepType.LONG_PRESS -> startCoordinatePickForStep(null)
+            StepType.CLICK, StepType.LONG_PRESS,
+            StepType.LEFT_CLICK_UP, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP -> startCoordinatePickForStep(null)
             StepType.FIND_IMAGE -> startRegionPickForFindImage(null)
             StepType.FIND_TEXT -> startRegionPickForFindText(null)
             StepType.SWIPE -> startSwipePickForStep(null)
@@ -393,16 +395,21 @@ class FloatingWindowService : Service() {
                         removePickerOverlay()
                         floatingBall?.visibility = View.VISIBLE
                         val type = pendingStepType ?: StepType.CLICK
-                        val step = existingStep ?: ScriptStep(type = type)
+                        val step = existingStep ?: ScriptStep(type = type).apply {
+                            // 右键按下默认 300ms 持续时间
+                            if (type == StepType.RIGHT_CLICK_DOWN) {
+                                duration = 300
+                            }
+                        }
                         step.x = x
                         step.y = y
                         val script = ensureEditingScript()
                         if (existingStep == null) {
                             script.steps.add(step)
-                            Log.d(TAG, "Added CLICK step at ($x, $y), total steps=${script.steps.size}")
+                            Log.d(TAG, "Added ${type.displayName} step at ($x, $y), total steps=${script.steps.size}")
                         }
                         openEditor()
-                        toast("已设置坐标: ($x, $y)")
+                        toast("已设置${type.displayName}: ($x, $y)")
                     }
                 }
                 true
@@ -419,7 +426,7 @@ class FloatingWindowService : Service() {
         )
         windowManager.addView(overlay, params)
         pickerOverlay = overlay
-        showPickerToast("点击屏幕选取${if (pendingStepType == StepType.LONG_PRESS) "长按" else "点击"}坐标")
+        showPickerToast("点击屏幕选取${pendingStepType?.displayName ?: "点击"}坐标")
     }
 
     /**
@@ -537,13 +544,14 @@ class FloatingWindowService : Service() {
                         val bottom = Math.max(startY, event.rawY).toInt()
                         dragging = false
                         removePickerOverlay()
-                        floatingBall?.visibility = View.VISIBLE
 
                         if (right - left < 20 || bottom - top < 20) {
+                            floatingBall?.visibility = View.VISIBLE
                             toast("区域太小，请重新选择")
                             openEditor()
                             return true
                         }
+                        // 不恢复悬浮球可见性，captureRegionAndSave 会先截图再恢复
                         captureRegionAndSave(left, top, right, bottom, existingStep)
                     }
                 }
@@ -575,33 +583,39 @@ class FloatingWindowService : Service() {
     private fun captureRegionAndSave(left: Int, top: Int, right: Int, bottom: Int, existingStep: ScriptStep?) {
         val service = ScreenCaptureService.instance
         if (service == null) {
-            toast("截屏服务未启动，请先授权截屏权限")
+            Log.e(TAG, "captureRegionAndSave: ScreenCaptureService.instance is null")
+            toast("截屏服务未启动，请在主界面授权截屏权限后再试")
             openEditor()
             return
         }
         // 在主线程先获取 script 引用，避免后台线程访问 editingScript 的竞态
         val script = ensureEditingScript()
-        // 截图前隐藏悬浮球，避免被截进去
+        // 截图前隐藏所有悬浮元素
         floatingBall?.visibility = View.GONE
+        toast("正在截图...")
+        Log.d(TAG, "captureRegionAndSave: region=($left,$top)-($right,$bottom), script=${script.name}")
         Thread {
             // 等屏幕刷新（遮罩层和悬浮球移除后）
-            try { Thread.sleep(200) } catch (_: InterruptedException) {}
+            try { Thread.sleep(300) } catch (_: InterruptedException) {}
 
             val bitmap = service.captureScreen()
             if (bitmap == null) {
+                Log.e(TAG, "captureRegionAndSave: captureScreen returned null")
                 handler.post {
                     floatingBall?.visibility = View.VISIBLE
-                    toast("截屏失败：${service.getDiagnosticInfo().takeLast(100)}")
+                    toast("截屏失败，请确保已授权截屏权限")
                     openEditor()
                 }
                 return@Thread
             }
+            Log.d(TAG, "captureRegionAndSave: bitmap=${bitmap.width}x${bitmap.height}")
             // 裁剪区域
             val cropLeft = left.coerceIn(0, bitmap.width - 1)
             val cropTop = top.coerceIn(0, bitmap.height - 1)
             val cropRight = right.coerceIn(cropLeft + 1, bitmap.width)
             val cropBottom = bottom.coerceIn(cropTop + 1, bitmap.height)
             val cropped = Bitmap.createBitmap(bitmap, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop)
+            Log.d(TAG, "captureRegionAndSave: cropped=${cropped.width}x${cropped.height}")
 
             // 确保当前脚本已保存（获取 scriptId）
             if (script.id.isBlank() || scriptManager.getScript(script.id) == null) {
@@ -624,7 +638,7 @@ class FloatingWindowService : Service() {
                         script.steps.add(step)
                         Log.d(TAG, "Added FIND_IMAGE step, total steps=${script.steps.size}")
                     }
-                    toast("已截取目标图片并设置区域 (${cropped.width}x${cropped.height})")
+                    toast("已截图并保存 (${cropped.width}x${cropped.height})")
                 } else {
                     toast("图片保存失败")
                 }

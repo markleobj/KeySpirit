@@ -184,6 +184,9 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
     private fun showStepTypeMenu() {
         val types = arrayOf(
             StepType.CLICK,
+            StepType.LEFT_CLICK_UP,
+            StepType.RIGHT_CLICK_DOWN,
+            StepType.RIGHT_CLICK_UP,
             StepType.FIND_IMAGE,
             StepType.FIND_TEXT,
             StepType.SWIPE,

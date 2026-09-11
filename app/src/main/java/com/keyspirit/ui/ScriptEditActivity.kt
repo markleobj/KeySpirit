@@ -139,10 +139,11 @@ class ScriptEditActivity : AppCompatActivity() {
         // 根据步骤类型显示不同的输入框
         val inputs = mutableMapOf<String, EditText>()
         when (step.type) {
-            StepType.CLICK, StepType.TOUCH_DOWN, StepType.TOUCH_UP -> {
+            StepType.CLICK, StepType.TOUCH_DOWN, StepType.TOUCH_UP,
+            StepType.LEFT_CLICK_UP, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP -> {
                 inputs["x"] = addInput(layout, "X 坐标", step.x.toString())
                 inputs["y"] = addInput(layout, "Y 坐标", step.y.toString())
-                if (step.type == StepType.TOUCH_DOWN || step.type == StepType.LONG_PRESS) {
+                if (step.type == StepType.TOUCH_DOWN || step.type == StepType.LONG_PRESS || step.type == StepType.RIGHT_CLICK_DOWN) {
                     inputs["duration"] = addInput(layout, "持续时间(ms)", step.duration.toString())
                 }
                 addCoordinatePickerButton(layout, inputs["x"]!!, inputs["y"]!!)
