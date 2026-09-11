@@ -191,11 +191,15 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             StepType.DELAY
         )
         val names = types.map { it.displayName }.toTypedArray()
-        android.app.AlertDialog.Builder(context)
+        val dialog = android.app.AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog)
             .setTitle("选择步骤类型")
             .setItems(names) { _, which ->
                 listener?.onAddStep(types[which])
             }
-            .show()
+            .setNegativeButton("取消", null)
+            .create()
+        // 从 Service 上下文弹 Dialog 必须设置窗口类型为悬浮窗，否则 BadTokenException 崩溃
+        dialog.window?.setType(android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+        dialog.show()
     }
 }
