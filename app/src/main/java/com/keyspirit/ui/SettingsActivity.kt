@@ -1,6 +1,9 @@
 package com.keyspirit.ui
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
@@ -28,6 +31,16 @@ class SettingsActivity : AppCompatActivity() {
         getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
     }
 
+    private val screenCaptureReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ScreenCaptureService.ACTION_STATE_CHANGED) {
+                val state = intent.getIntExtra(ScreenCaptureService.EXTRA_STATE, ScreenCaptureService.STATE_STOPPED)
+                val error = intent.getStringExtra(ScreenCaptureService.EXTRA_ERROR) ?: ""
+                handleScreenCaptureState(state, error)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
@@ -52,9 +65,53 @@ class SettingsActivity : AppCompatActivity() {
         updatePermissionStatus()
     }
 
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter(ScreenCaptureService.ACTION_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(screenCaptureReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(screenCaptureReceiver, filter)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        try {
+            unregisterReceiver(screenCaptureReceiver)
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
+
+    private fun handleScreenCaptureState(state: Int, error: String) {
+        when (state) {
+            ScreenCaptureService.STATE_RUNNING -> {
+                switchScreenCapture.isChecked = true
+                Toast.makeText(this, "截屏服务已启动", Toast.LENGTH_SHORT).show()
+            }
+            ScreenCaptureService.STATE_ERROR -> {
+                switchScreenCapture.isChecked = false
+                val msg = if (error.isNotEmpty()) {
+                    "截屏服务启动失败：$error"
+                } else {
+                    "截屏服务启动失败，请重试"
+                }
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            }
+            ScreenCaptureService.STATE_STOPPED -> {
+                switchScreenCapture.isChecked = false
+            }
+            ScreenCaptureService.STATE_STARTING -> {
+                switchScreenCapture.isChecked = false
+            }
+        }
+    }
+
     private fun updatePermissionStatus() {
         switchAccessibility.isChecked = AutoAccessibilityService.isRunning()
         switchFloating.isChecked = canDrawOverlays()
+        // 使用 isRunning 检查（状态为 RUNNING 才认为已开启）
         switchScreenCapture.isChecked = ScreenCaptureService.isRunning()
     }
 
@@ -95,10 +152,15 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun requestScreenCapture() {
+        // 如果服务已经在运行，提示用户
+        if (ScreenCaptureService.isRunning()) {
+            Toast.makeText(this, "截屏服务已在运行中", Toast.LENGTH_SHORT).show()
+            return
+        }
         try {
             startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_SCREEN_CAPTURE)
         } catch (e: Exception) {
-            Toast.makeText(this, "无法请求截屏权限", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "无法请求截屏权限: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -117,7 +179,8 @@ class SettingsActivity : AppCompatActivity() {
                     } else {
                         startService(intent)
                     }
-                    Toast.makeText(this, "截屏服务已启动", Toast.LENGTH_SHORT).show()
+                    // 不在这里显示"已启动"toast，等待服务状态广播确认
+                    Toast.makeText(this, "正在启动截屏服务...", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     Toast.makeText(this, "截屏服务启动失败: ${e.message}", Toast.LENGTH_LONG).show()
                 }

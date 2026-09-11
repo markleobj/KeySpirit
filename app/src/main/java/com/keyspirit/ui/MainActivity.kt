@@ -1,8 +1,11 @@
 package com.keyspirit.ui
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -29,6 +32,21 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adapter: ScriptAdapter
     private lateinit var projectionManager: MediaProjectionManager
     private lateinit var tvCurrentScript: TextView
+
+    private val screenCaptureReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ScreenCaptureService.ACTION_STATE_CHANGED) {
+                val state = intent.getIntExtra(ScreenCaptureService.EXTRA_STATE, ScreenCaptureService.STATE_STOPPED)
+                val error = intent.getStringExtra(ScreenCaptureService.EXTRA_ERROR) ?: ""
+                when (state) {
+                    ScreenCaptureService.STATE_RUNNING ->
+                        Toast.makeText(this@MainActivity, "截屏服务已启动", Toast.LENGTH_SHORT).show()
+                    ScreenCaptureService.STATE_ERROR ->
+                        Toast.makeText(this@MainActivity, "截屏服务启动失败：$error", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
 
     companion object {
         private const val REQUEST_SCREEN_CAPTURE = 2001
@@ -87,18 +105,38 @@ class MainActivity : AppCompatActivity() {
                         putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, resultCode)
                         putExtra(ScreenCaptureService.EXTRA_DATA, data)
                     }
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         startForegroundService(intent)
                     } else {
                         startService(intent)
                     }
-                    Toast.makeText(this, "截屏服务已启动", Toast.LENGTH_SHORT).show()
+                    // 不在这里显示"已启动"，等待服务状态广播确认
+                    Toast.makeText(this, "正在启动截屏服务...", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     Toast.makeText(this, "截屏服务启动失败: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             } else {
                 Toast.makeText(this, "未授权截屏，找图/找文字/截图功能不可用", Toast.LENGTH_LONG).show()
             }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter(ScreenCaptureService.ACTION_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(screenCaptureReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(screenCaptureReceiver, filter)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        try {
+            unregisterReceiver(screenCaptureReceiver)
+        } catch (e: Exception) {
+            // ignore
         }
     }
 

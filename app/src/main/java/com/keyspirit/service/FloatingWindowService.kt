@@ -501,9 +501,27 @@ class FloatingWindowService : Service() {
     private fun startRegionPickForFindImage(existingStep: ScriptStep?) {
         // 预检查：截屏服务必须运行
         if (!com.keyspirit.service.ScreenCaptureService.isRunning()) {
+            val state = com.keyspirit.service.ScreenCaptureService.getState()
+            val error = com.keyspirit.service.ScreenCaptureService.getError()
+            val message = buildString {
+                append("找图功能需要截屏权限。")
+                when (state) {
+                    com.keyspirit.service.ScreenCaptureService.STATE_ERROR -> {
+                        append("\n\n截屏服务启动失败：")
+                        append(error.ifEmpty { "未知错误" })
+                        append("\n\n请返回设置页重新授权截屏权限。")
+                    }
+                    com.keyspirit.service.ScreenCaptureService.STATE_STARTING -> {
+                        append("\n\n截屏服务正在启动中，请稍候再试。")
+                    }
+                    else -> {
+                        append("\n\n请返回设置页，开启截屏权限后再试。")
+                    }
+                }
+            }
             showAlertDialog(
                 title = "截屏服务未启动",
-                message = "找图功能需要截屏权限。请返回主界面，点击\"开始录制\"按钮授权截屏权限后再试。",
+                message = message,
                 positive = "知道了"
             ) { openEditor() }
             return
@@ -608,9 +626,15 @@ class FloatingWindowService : Service() {
             if (service == null) {
                 Log.e(TAG, "captureRegionAndSave: ScreenCaptureService.instance is null")
                 floatingBall?.visibility = View.VISIBLE
+                val error = ScreenCaptureService.getError()
+                val message = if (error.isNotEmpty()) {
+                    "截屏服务已断开：$error\n\n请返回设置页重新授权截屏权限。"
+                } else {
+                    "截屏服务已断开。请返回设置页重新授权截屏权限。"
+                }
                 showAlertDialog(
                     title = "截屏失败",
-                    message = "截屏服务已断开。请返回主界面，点击\"开始录制\"重新授权截屏权限。",
+                    message = message,
                     positive = "好的"
                 ) { openEditor() }
                 return
@@ -1296,7 +1320,13 @@ class FloatingWindowService : Service() {
         hidePanel()
         val service = com.keyspirit.service.ScreenCaptureService.instance
         if (service == null) {
-            toast("截屏服务未启动，请先在 App 首页授权截屏权限", long = true)
+            val error = com.keyspirit.service.ScreenCaptureService.getError()
+            val msg = if (error.isNotEmpty()) {
+                "截屏服务未启动：$error"
+            } else {
+                "截屏服务未启动，请先在设置页开启截屏权限"
+            }
+            toast(msg, long = true)
             return
         }
         toast("正在截图...")

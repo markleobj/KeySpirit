@@ -34,10 +34,33 @@ class ScreenCaptureService : Service() {
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_DATA = "data"
 
+        // 服务状态广播
+        const val ACTION_STATE_CHANGED = "com.keyspirit.SCREEN_CAPTURE_STATE_CHANGED"
+        const val EXTRA_STATE = "state"
+        const val EXTRA_ERROR = "error"
+
+        // 状态值
+        const val STATE_STOPPED = 0
+        const val STATE_STARTING = 1
+        const val STATE_RUNNING = 2
+        const val STATE_ERROR = 3
+
         var instance: ScreenCaptureService? = null
             private set
 
-        fun isRunning(): Boolean = instance != null
+        @Volatile
+        private var currentState: Int = STATE_STOPPED
+
+        @Volatile
+        private var currentError: String = ""
+
+        fun isRunning(): Boolean = instance != null && currentState == STATE_RUNNING
+
+        fun isServiceAlive(): Boolean = instance != null
+
+        fun getState(): Int = currentState
+
+        fun getError(): String = currentError
 
         /**
          * 判断 MediaProjection 是否仍然有效（未被系统停止）。
@@ -74,6 +97,7 @@ class ScreenCaptureService : Service() {
         override fun onStop() {
             Log.w(TAG, "MediaProjection 已被系统停止")
             mediaProjection = null
+            setState(STATE_ERROR, "MediaProjection 被系统停止，请重新授权")
         }
     }
 
@@ -105,6 +129,8 @@ class ScreenCaptureService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        setState(STATE_STARTING, "正在启动截屏服务...")
+        Log.d(TAG, "onCreate: 截屏服务实例已创建")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -112,74 +138,105 @@ class ScreenCaptureService : Service() {
         @Suppress("DEPRECATION")
         val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
 
-        // Android 14+ 必须在 5 秒内调用 startForeground，否则崩溃。
-        // 所以无论成功失败，都先想办法调到 startForeground，再决定是否 stopSelf。
-        if (resultCode == 0 || data == null) {
-            Log.e(TAG, "onStartCommand 缺少截屏授权数据 (resultCode=$resultCode)")
-            startForegroundFallback("截屏授权数据缺失，服务未启动")
-            stopSelf()
-            return START_NOT_STICKY
-        }
+        Log.d(TAG, "onStartCommand: resultCode=$resultCode, data=${data != null}")
 
-        // 第一步：创建 MediaProjection 对象（Android 14 要求 mediaProjection 前台服务启动前必须已有 MediaProjection）
+        // Android 14+ 必须在 5 秒内调用 startForeground，否则崩溃。
+        // 所以无论成功失败，都先想办法调到 startForeground，再决定后续。
+
+        // 第一步：创建 MediaProjection 对象
         var projectionOk = false
-        try {
-            createMediaProjection(resultCode, data)
-            projectionOk = mediaProjection != null
-        } catch (e: Exception) {
-            Log.e(TAG, "createMediaProjection 失败", e)
+        var projectionError = ""
+        if (resultCode == 0 || data == null) {
+            projectionError = "截屏授权数据缺失 (resultCode=$resultCode, data=${data != null})"
+            Log.e(TAG, "onStartCommand: $projectionError")
+        } else {
+            try {
+                createMediaProjection(resultCode, data)
+                projectionOk = mediaProjection != null
+                if (!projectionOk) {
+                    projectionError = "MediaProjection 对象为 null"
+                }
+            } catch (e: Exception) {
+                projectionError = "createMediaProjection 异常: ${e.message}"
+                Log.e(TAG, "createMediaProjection 失败", e)
+            }
         }
 
         // 第二步：立即启动前台服务（必须在 onStartCommand 5秒内调用）
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val type = if (projectionOk) {
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-                } else {
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                }
-                startForeground(NOTIFICATION_ID, createNotification(), type)
-            } else {
-                startForeground(NOTIFICATION_ID, createNotification())
-            }
-            Log.d(TAG, "前台服务已启动 (projectionOk=$projectionOk)")
-        } catch (e: Exception) {
-            Log.e(TAG, "startForeground 失败", e)
-        }
+        val fgOk = startForegroundRobust(projectionOk)
 
-        if (!projectionOk) {
-            Log.e(TAG, "MediaProjection 创建失败，停止服务")
+        if (!fgOk) {
+            // startForeground 完全失败，系统会在 5 秒后杀服务，不如主动停止
+            Log.e(TAG, "startForeground 完全失败，停止服务")
+            setState(STATE_ERROR, "无法启动前台服务: $projectionError")
             stopSelf()
             return START_NOT_STICKY
         }
 
-        // 第三步：服务成为前台后，再创建 VirtualDisplay（避免在非前台状态创建导致崩溃）
+        if (!projectionOk) {
+            // MediaProjection 创建失败，但前台服务已启动。
+            // 保持服务运行并标记 ERROR，让用户能看到诊断信息，而不是静默退出。
+            Log.e(TAG, "MediaProjection 创建失败: $projectionError")
+            setState(STATE_ERROR, projectionError)
+            return START_NOT_STICKY
+        }
+
+        // 第三步：服务成为前台后，再创建 VirtualDisplay
         try {
             setupVirtualDisplay()
+            setState(STATE_RUNNING, "")
+            Log.d(TAG, "截屏服务启动成功，VirtualDisplay 已创建")
         } catch (e: Exception) {
             Log.e(TAG, "setupVirtualDisplay 失败", e)
+            setState(STATE_ERROR, "VirtualDisplay 创建失败: ${e.message}")
         }
 
         return START_NOT_STICKY
     }
 
     /**
-     * 当 MediaProjection 不可用时，用 specialUse 类型启动前台服务，避免 Android 14 崩溃。
+     * 健壮地启动前台服务：依次尝试 mediaProjection → specialUse → 无类型。
+     * 只要有一种成功就返回 true。
      */
-    private fun startForegroundFallback(reason: String) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+    private fun startForegroundRobust(projectionOk: Boolean): Boolean {
+        val notification = createNotification()
+
+        // 尝试 1: 如果 MediaProjection 成功，用 mediaProjection 类型
+        if (projectionOk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
                 startForeground(
-                    NOTIFICATION_ID,
-                    createNotification(),
+                    NOTIFICATION_ID, notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+                Log.d(TAG, "startForeground 成功 (mediaProjection)")
+                return true
+            } catch (e: Exception) {
+                Log.w(TAG, "startForeground(mediaProjection) 失败，降级到 specialUse", e)
+            }
+        }
+
+        // 尝试 2: specialUse 类型
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                startForeground(
+                    NOTIFICATION_ID, notification,
                     android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 )
-            } else {
-                startForeground(NOTIFICATION_ID, createNotification())
+                Log.d(TAG, "startForeground 成功 (specialUse)")
+                return true
+            } catch (e: Exception) {
+                Log.w(TAG, "startForeground(specialUse) 失败，降级到无类型", e)
             }
-            Log.w(TAG, "已用 specialUse 类型启动前台服务（兜底）: $reason")
+        }
+
+        // 尝试 3: 无类型（兼容旧版本）
+        try {
+            startForeground(NOTIFICATION_ID, notification)
+            Log.d(TAG, "startForeground 成功 (无类型)")
+            return true
         } catch (e: Exception) {
-            Log.e(TAG, "startForegroundFallback 失败", e)
+            Log.e(TAG, "startForeground(无类型) 也失败", e)
+            return false
         }
     }
 
@@ -194,11 +251,11 @@ class ScreenCaptureService : Service() {
 
     /**
      * 仅创建 MediaProjection 对象并获取屏幕尺寸，不创建 VirtualDisplay。
-     * 这一步在 startForeground 之前完成，满足 Android 14 的要求。
      */
     private fun createMediaProjection(resultCode: Int, data: Intent) {
         val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val projection = manager.getMediaProjection(resultCode, data)
+            ?: throw IllegalStateException("getMediaProjection 返回 null")
         mediaProjection = projection
         projection.registerCallback(projectionCallback, mainHandler)
 
@@ -232,7 +289,7 @@ class ScreenCaptureService : Service() {
     private fun setupVirtualDisplay() {
         val projection = mediaProjection ?: run {
             Log.e(TAG, "setupVirtualDisplay: mediaProjection 为 null")
-            return
+            throw IllegalStateException("mediaProjection 为 null")
         }
         imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 3)
         imageReader!!.setOnImageAvailableListener(imageAvailableListener, mainHandler)
@@ -249,9 +306,34 @@ class ScreenCaptureService : Service() {
     }
 
     /**
+     * 更新服务状态并发送广播通知 UI。
+     */
+    private fun setState(state: Int, error: String) {
+        currentState = state
+        currentError = error
+        Log.d(TAG, "状态变更: ${stateName(state)}, error=$error")
+        try {
+            val intent = Intent(ACTION_STATE_CHANGED).apply {
+                setPackage(packageName)
+                putExtra(EXTRA_STATE, state)
+                putExtra(EXTRA_ERROR, error)
+            }
+            sendBroadcast(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "发送状态广播失败", e)
+        }
+    }
+
+    private fun stateName(state: Int): String = when (state) {
+        STATE_STOPPED -> "STOPPED"
+        STATE_STARTING -> "STARTING"
+        STATE_RUNNING -> "RUNNING"
+        STATE_ERROR -> "ERROR"
+        else -> "UNKNOWN($state)"
+    }
+
+    /**
      * 截取当前屏幕一帧。
-     * 直接取 latestImage（OnImageAvailableListener 持续缓存的最新帧），
-     * 不丢弃、不等待新帧，所以静态屏幕也能拿到截图。
      */
     fun captureScreen(): Bitmap? {
         lastCaptureTime = System.currentTimeMillis()
@@ -272,7 +354,6 @@ class ScreenCaptureService : Service() {
             return null
         }
 
-        // 直接从 ImageReader 取最新帧，避免用到遮罩层还在时的旧帧
         var capturedImage: Image? = null
         try {
             capturedImage = imageReader?.acquireLatestImage()
@@ -280,7 +361,6 @@ class ScreenCaptureService : Service() {
             Log.w(TAG, "acquireLatestImage 异常，回退到缓存帧", e)
         }
 
-        // 如果没取到新帧，用缓存的 latestImage
         if (capturedImage == null) {
             synchronized(imageLock) {
                 capturedImage = latestImage
@@ -333,7 +413,8 @@ class ScreenCaptureService : Service() {
     fun getDiagnosticInfo(): String {
         val sb = StringBuilder()
         sb.appendLine("=== 截屏服务诊断 ===")
-        sb.appendLine("服务运行: ${instance != null}")
+        sb.appendLine("服务状态: ${stateName(currentState)}")
+        sb.appendLine("服务存活: ${instance != null}")
         sb.appendLine("MediaProjection有效: ${mediaProjection != null}")
         sb.appendLine("初始化完成: $initDone")
         sb.appendLine("屏幕尺寸: ${screenWidth}x${screenHeight}, density=$screenDensity")
@@ -343,6 +424,9 @@ class ScreenCaptureService : Service() {
         sb.appendLine("最新帧: ${latestImage != null}")
         sb.appendLine("最近截屏: ${if (lastCaptureTime > 0) java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(lastCaptureTime)) else "无"}")
         sb.appendLine("最近结果: $lastError")
+        if (currentError.isNotEmpty()) {
+            sb.appendLine("错误信息: $currentError")
+        }
         return sb.toString()
     }
 
@@ -354,10 +438,8 @@ class ScreenCaptureService : Service() {
             val rowStride = plane.rowStride
             val rowPadding = rowStride - pixelStride * image.width
 
-            // 确保 buffer 从起始位置读取（latestImage 可能被多次读取）
             buffer.rewind()
 
-            // bitmap 宽度 = image.width + padding 对应的像素数（向上取整）
             val bitmapWidth = if (rowPadding > 0) {
                 image.width + (rowPadding + pixelStride - 1) / pixelStride
             } else {
@@ -371,7 +453,6 @@ class ScreenCaptureService : Service() {
             )
             bitmap.copyPixelsFromBuffer(buffer)
 
-            // 裁剪掉 padding，返回 image.width x image.height 的 bitmap
             return if (rowPadding > 0 && bitmapWidth != image.width) {
                 Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
             } else {
@@ -385,7 +466,8 @@ class ScreenCaptureService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        instance = null
+        Log.d(TAG, "onDestroy: 截屏服务正在停止")
+        setState(STATE_STOPPED, "服务已停止")
         synchronized(imageLock) {
             latestImage?.close()
             latestImage = null
@@ -401,6 +483,7 @@ class ScreenCaptureService : Service() {
             Log.e(TAG, "停止 MediaProjection 异常", e)
         }
         mediaProjection = null
+        instance = null
         Log.d(TAG, "截屏服务已停止")
     }
 }
