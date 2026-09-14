@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#3498DB</color>
+    <color name="primary_dark">#2980B9</color>
+    <color name="accent">#E74C3C</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+    <color name="gray">#999999</color>
+    <color name="light_gray">#F5F6F8</color>
+    <color name="divider">#EEEEEE</color>
+
+    <color name="tag_click_bg">#E8F5E9</color>
+    <color name="tag_click_fg">#2E7D32</color>
+    <color name="tag_swipe_bg">#FFF3E0</color>
+    <color name="tag_swipe_fg">#E65100</color>
+    <color name="tag_delay_bg">#E3F2FD</color>
+    <color name="tag_delay_fg">#1565C0</color>
+    <color name="tag_findimg_bg">#F3E5F5</color>
+    <color name="tag_findimg_fg">#6A1B9A</color>
+    <color name="tag_findtext_bg">#FCE4EC</color>
+    <color name="tag_findtext_fg">#880E4F</color>
+    <color name="tag_loop_bg">#FFF9C4</color>
+    <color name="tag_loop_fg">#F57F17</color>
+</resources>

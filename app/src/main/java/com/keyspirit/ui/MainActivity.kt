@@ -1,0 +1,303 @@
+package com.keyspirit.ui
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.media.projection.MediaProjectionManager
+import android.os.Build
+import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.keyspirit.KeySpiritApp
+import com.keyspirit.R
+import com.keyspirit.script.Script
+import com.keyspirit.script.ScriptManager
+import com.keyspirit.service.FloatingWindowService
+import com.keyspirit.service.ScreenCaptureService
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var scriptManager: ScriptManager
+    private lateinit var recyclerView: RecyclerView
+    private lateinit var adapter: ScriptAdapter
+    private lateinit var projectionManager: MediaProjectionManager
+    private lateinit var tvCurrentScript: TextView
+
+    private val screenCaptureReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ScreenCaptureService.ACTION_STATE_CHANGED) {
+                val state = intent.getIntExtra(ScreenCaptureService.EXTRA_STATE, ScreenCaptureService.STATE_STOPPED)
+                val error = intent.getStringExtra(ScreenCaptureService.EXTRA_ERROR) ?: ""
+                when (state) {
+                    ScreenCaptureService.STATE_RUNNING ->
+                        Toast.makeText(this@MainActivity, "截屏服务已启动", Toast.LENGTH_SHORT).show()
+                    ScreenCaptureService.STATE_ERROR ->
+                        Toast.makeText(this@MainActivity, "截屏服务启动失败：$error", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    companion object {
+        private const val REQUEST_SCREEN_CAPTURE = 2001
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        scriptManager = KeySpiritApp.instance.scriptManager
+        recyclerView = findViewById(R.id.scriptList)
+        recyclerView.layoutManager = LinearLayoutManager(this)
+        tvCurrentScript = findViewById(R.id.tvCurrentScript)
+        projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+
+        // 显示版本号
+        try {
+            val versionName = packageManager.getPackageInfo(packageName, 0).versionName
+            findViewById<TextView>(R.id.tvTitle).text = "按键精灵 v$versionName"
+        } catch (e: Exception) {
+            findViewById<TextView>(R.id.tvTitle).text = "按键精灵"
+        }
+
+        findViewById<View>(R.id.btnSettings).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        findViewById<View>(R.id.btnNewScript).setOnClickListener {
+            val script = Script(name = "新脚本")
+            scriptManager.saveScript(script)
+            openEditor(script.id)
+        }
+
+        findViewById<View>(R.id.btnStartRecord).setOnClickListener {
+            startFloatingService()
+        }
+
+        // 初始化截屏权限（用于找图/找文字/截图），仅在首次启动时请求
+        if (!ScreenCaptureService.isRunning()) {
+            val prefs = getSharedPreferences("keyspirit_settings", Context.MODE_PRIVATE)
+            if (!prefs.getBoolean("screen_capture_asked", false)) {
+                requestScreenCapture()
+                prefs.edit().putBoolean("screen_capture_asked", true).apply()
+            }
+        }
+    }
+
+    private fun requestScreenCapture() {
+        try {
+            startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_SCREEN_CAPTURE)
+        } catch (e: Exception) {
+            Toast.makeText(this, "无法请求截屏权限", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_SCREEN_CAPTURE) {
+            if (resultCode == RESULT_OK && data != null) {
+                // 启动截屏服务
+                try {
+                    val intent = Intent(this, ScreenCaptureService::class.java).apply {
+                        putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, resultCode)
+                        putExtra(ScreenCaptureService.EXTRA_DATA, data)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
+                    // 不在这里显示"已启动"，等待服务状态广播确认
+                    Toast.makeText(this, "正在启动截屏服务...", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "截屏服务启动失败: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            } else {
+                Toast.makeText(this, "未授权截屏，找图/找文字/截图功能不可用", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter(ScreenCaptureService.ACTION_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(screenCaptureReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(screenCaptureReceiver, filter)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        try {
+            unregisterReceiver(screenCaptureReceiver)
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshScripts()
+    }
+
+    private fun refreshScripts() {
+        val currentId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
+        val currentName = com.keyspirit.util.CurrentProjectHolder.currentScriptName
+        tvCurrentScript.text = currentName ?: "未选择"
+
+        val scripts = scriptManager.getAllScripts().sortedByDescending { it.updatedAt }
+        adapter = ScriptAdapter(scripts, currentId, object : ScriptAdapter.OnItemClickListener {
+            override fun onPlay(script: Script) {
+                runScript(script)
+            }
+            override fun onEdit(script: Script) {
+                openEditor(script.id)
+            }
+            override fun onDelete(script: Script) {
+                scriptManager.deleteScript(script.id)
+                if (com.keyspirit.util.CurrentProjectHolder.currentScriptId == script.id) {
+                    com.keyspirit.util.CurrentProjectHolder.currentScriptId = null
+                    com.keyspirit.util.CurrentProjectHolder.currentScriptName = null
+                }
+                refreshScripts()
+            }
+            override fun onSetCurrent(script: Script) {
+                com.keyspirit.util.CurrentProjectHolder.currentScriptId = script.id
+                com.keyspirit.util.CurrentProjectHolder.currentScriptName = script.name
+                Toast.makeText(this@MainActivity, "已设为当前脚本：${script.name}", Toast.LENGTH_SHORT).show()
+                refreshScripts()
+            }
+        })
+        recyclerView.adapter = adapter
+    }
+
+    private fun openEditor(scriptId: String) {
+        // 设置当前项目
+        val script = scriptManager.getScript(scriptId)
+        if (script != null) {
+            com.keyspirit.util.CurrentProjectHolder.currentScriptId = script.id
+            com.keyspirit.util.CurrentProjectHolder.currentScriptName = script.name
+        }
+        val intent = Intent(this, ScriptEditActivity::class.java).apply {
+            putExtra(ScriptEditActivity.EXTRA_SCRIPT_ID, scriptId)
+        }
+        startActivity(intent)
+    }
+
+    private fun runScript(script: Script) {
+        // 检查无障碍服务
+        if (!com.keyspirit.service.AutoAccessibilityService.isRunning()) {
+            Toast.makeText(this, "请先在设置中开启无障碍服务", Toast.LENGTH_LONG).show()
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return
+        }
+        // 检查悬浮窗权限
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "请先开启悬浮窗权限", Toast.LENGTH_LONG).show()
+            startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:$packageName")))
+            return
+        }
+        // 设置当前项目
+        com.keyspirit.util.CurrentProjectHolder.currentScriptId = script.id
+        com.keyspirit.util.CurrentProjectHolder.currentScriptName = script.name
+
+        startFloatingService()
+        // 通知悬浮窗服务执行脚本
+        val intent = Intent(this, FloatingWindowService::class.java).apply {
+            action = FloatingWindowService.ACTION_EXECUTE_SCRIPT
+            putExtra(FloatingWindowService.EXTRA_SCRIPT_ID, script.id)
+        }
+        startService(intent)
+    }
+
+    private fun startFloatingService() {
+        // 检查悬浮窗权限
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "请先开启悬浮窗权限", Toast.LENGTH_LONG).show()
+            val intent = Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:$packageName"))
+            startActivity(intent)
+            return
+        }
+        if (!FloatingWindowService.isRunning()) {
+            val intent = Intent(this, FloatingWindowService::class.java)
+            startService(intent)
+        }
+        // 回到桌面，让用户看到悬浮窗
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(homeIntent)
+    }
+
+    class ScriptAdapter(
+        private val scripts: List<Script>,
+        private val currentId: String?,
+        private val listener: OnItemClickListener
+    ) : RecyclerView.Adapter<ScriptAdapter.ViewHolder>() {
+
+        interface OnItemClickListener {
+            fun onPlay(script: Script)
+            fun onEdit(script: Script)
+            fun onDelete(script: Script)
+            fun onSetCurrent(script: Script)
+        }
+
+        class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+            val tvName: TextView = view.findViewById(R.id.tvScriptName)
+            val tvInfo: TextView = view.findViewById(R.id.tvScriptInfo)
+            val tvCurrentBadge: TextView = view.findViewById(R.id.tvCurrentBadge)
+            val btnPlay: TextView = view.findViewById(R.id.btnPlay)
+            val btnEdit: TextView = view.findViewById(R.id.btnEdit)
+            val btnDelete: TextView = view.findViewById(R.id.btnDelete)
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+            val view = LayoutInflater.from(parent.context)
+                .inflate(R.layout.item_script, parent, false)
+            return ViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+            val script = scripts[position]
+            holder.tvName.text = script.name
+
+            // 显示"当前"标记
+            holder.tvCurrentBadge.visibility = if (script.id == currentId) View.VISIBLE else View.GONE
+
+            val dateFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+            val lastRun = if (script.lastRunAt > 0) {
+                "最近运行 ${dateFormat.format(Date(script.lastRunAt))}"
+            } else {
+                "从未运行"
+            }
+            holder.tvInfo.text = "${script.stepCount()} 步 · $lastRun"
+
+            holder.btnPlay.setOnClickListener { listener.onPlay(script) }
+            holder.btnEdit.setOnClickListener { listener.onEdit(script) }
+            holder.btnDelete.setOnClickListener { listener.onDelete(script) }
+            // 长按脚本项设为当前脚本
+            holder.itemView.setOnLongClickListener {
+                listener.onSetCurrent(script)
+                true
+            }
+        }
+
+        override fun getItemCount(): Int = scripts.size
+    }
+}

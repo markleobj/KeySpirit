@@ -1,0 +1,162 @@
+package com.keyspirit.util
+
+import android.graphics.Bitmap
+import android.graphics.Point
+import android.graphics.Rect
+import android.util.Log
+
+class ImageMatcher private constructor() {
+
+    companion object {
+        private const val TAG = "ImageMatcher"
+        var instance: ImageMatcher? = null
+            private set
+
+        fun init() {
+            if (instance == null) instance = ImageMatcher()
+        }
+    }
+
+    /**
+     * 在当前屏幕中查找指定图片
+     * @param imagePath 模板图片路径
+     * @param similarity 相似度阈值 0~1
+     * @param timeout 超时时间 ms
+     * @param region 限定查找区域（null 表示全屏）
+     * @return 找到的中心点坐标，未找到返回 null
+     */
+    fun findImage(imagePath: String, similarity: Double, timeout: Long, region: Rect? = null): Point? {
+        val templateBitmap = loadTemplate(imagePath) ?: return null
+
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < timeout) {
+            val screenBitmap = captureScreen() ?: run {
+                try { Thread.sleep(200) } catch (_: InterruptedException) { return null }
+                continue
+            }
+            Log.d(TAG, "截图尺寸: ${screenBitmap.width}x${screenBitmap.height}, 查找区域: ${region?.left},${region?.top},${region?.right},${region?.bottom}")
+            // 如果指定了区域，裁剪屏幕位图
+            val (searchBitmap, offsetX, offsetY) = if (region != null) {
+                val left = region.left.coerceIn(0, screenBitmap.width)
+                val top = region.top.coerceIn(0, screenBitmap.height)
+                val right = region.right.coerceIn(left, screenBitmap.width)
+                val bottom = region.bottom.coerceIn(top, screenBitmap.height)
+                Log.d(TAG, "裁剪后区域: $left,$top,$right,$bottom, 裁剪尺寸: ${right-left}x${bottom-top}")
+                if (right - left < 10 || bottom - top < 10) {
+                    Triple(screenBitmap, 0, 0)
+                } else {
+                    try {
+                        Triple(Bitmap.createBitmap(screenBitmap, left, top, right - left, bottom - top), left, top)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "裁剪区域失败", e)
+                        Triple(screenBitmap, 0, 0)
+                    }
+                }
+            } else {
+                Triple(screenBitmap, 0, 0)
+            }
+            val result = matchTemplate(searchBitmap, templateBitmap, similarity)
+            if (result != null) {
+                return Point(result.x + offsetX, result.y + offsetY)
+            }
+            try { Thread.sleep(200) } catch (_: InterruptedException) { return null }
+        }
+        return null
+    }
+
+    private fun captureScreen(): Bitmap? {
+        // 通过 ScreenCaptureService 按需截屏
+        return com.keyspirit.service.ScreenCaptureService.instance?.captureScreen()
+    }
+
+    private fun loadTemplate(path: String): Bitmap? {
+        return try {
+            android.graphics.BitmapFactory.decodeFile(path)
+        } catch (e: Exception) {
+            Log.e(TAG, "加载模板图片失败: $path", e)
+            null
+        }
+    }
+
+    /**
+     * 模板匹配 - 使用简单的像素比较算法
+     * 生产环境建议用 OpenCV matchTemplate
+     */
+    private fun matchTemplate(screen: Bitmap, template: Bitmap, threshold: Double): Point? {
+        return try {
+            val sw = screen.width
+            val sh = screen.height
+            val tw = template.width
+            val th = template.height
+
+            if (tw > sw || th > sh) return null
+            if (tw <= 0 || th <= 0 || sw <= 0 || sh <= 0) return null
+
+            // 降采样以提高速度
+            val scale = 4
+            val sw2 = (sw / scale).coerceAtLeast(1)
+            val sh2 = (sh / scale).coerceAtLeast(1)
+            val tw2 = (tw / scale).coerceAtLeast(1)
+            val th2 = (th / scale).coerceAtLeast(1)
+
+            // 模板缩放后仍需小于屏幕
+            if (tw2 > sw2 || th2 > sh2) return null
+
+            val screenSmall = Bitmap.createScaledBitmap(screen, sw2, sh2, false)
+            val templateSmall = Bitmap.createScaledBitmap(template, tw2, th2, false)
+
+            val screenPixels = IntArray(sw2 * sh2)
+            screenSmall.getPixels(screenPixels, 0, sw2, 0, 0, sw2, sh2)
+            val templatePixels = IntArray(tw2 * th2)
+            templateSmall.getPixels(templatePixels, 0, tw2, 0, 0, tw2, th2)
+
+            var bestX = -1
+            var bestY = -1
+            var bestScore = 0.0
+
+            for (y in 0..sh2 - th2 step 2) {
+                for (x in 0..sw2 - tw2 step 2) {
+                    val score = calculateSimilarity(screenPixels, sw2, x, y, templatePixels, tw2, th2)
+                    if (score > bestScore) {
+                        bestScore = score
+                        bestX = x
+                        bestY = y
+                    }
+                }
+            }
+
+            if (bestScore >= threshold && bestX >= 0) {
+                Point(bestX * scale + tw / 2, bestY * scale + th / 2)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "matchTemplate 异常", e)
+            null
+        }
+    }
+
+    private fun calculateSimilarity(
+        screen: IntArray, screenW: Int, sx: Int, sy: Int,
+        template: IntArray, templateW: Int, templateH: Int
+    ): Double {
+        var match = 0
+        var total = 0
+        for (y in 0 until templateH) {
+            for (x in 0 until templateW) {
+                val screenPixel = screen[(sy + y) * screenW + (sx + x)]
+                val templatePixel = template[y * templateW + x]
+                val sr = (screenPixel shr 16) and 0xff
+                val sg = (screenPixel shr 8) and 0xff
+                val sb = screenPixel and 0xff
+                val tr = (templatePixel shr 16) and 0xff
+                val tg = (templatePixel shr 8) and 0xff
+                val tb = templatePixel and 0xff
+                val diff = Math.abs(sr - tr) + Math.abs(sg - tg) + Math.abs(sb - tb)
+                if (diff < 60) match++
+                total++
+            }
+        }
+        return if (total == 0) 0.0 else match.toDouble() / total
+    }
+}
