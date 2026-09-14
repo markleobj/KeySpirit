@@ -30,7 +30,8 @@ class ImageMatcher private constructor() {
 
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < timeout) {
-            val screenBitmap = captureScreen() ?: run {
+            val screenBitmap = captureScreen()
+            if (screenBitmap == null) {
                 try { Thread.sleep(200) } catch (_: InterruptedException) { return null }
                 continue
             }

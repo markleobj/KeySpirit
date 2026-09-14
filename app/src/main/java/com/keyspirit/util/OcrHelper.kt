@@ -19,7 +19,7 @@ class OcrHelper private constructor() {
         }
     }
 
-    private val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.DEFAULT_OPTIONS)
+    private val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
 
     /**
      * 在屏幕中查找指定文字并返回其坐标

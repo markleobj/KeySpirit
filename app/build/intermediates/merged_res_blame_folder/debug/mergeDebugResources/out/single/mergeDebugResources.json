@@ -1,0 +1,66 @@
+[
+    {
+        "merged": "com.keyspirit.app-debug-34:/layout_activity_script_edit.xml.flat",
+        "source": "com.keyspirit.app-main-36:/layout/activity_script_edit.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/drawable_bg_tag_edit.xml.flat",
+        "source": "com.keyspirit.app-main-36:/drawable/bg_tag_edit.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "com.keyspirit.app-main-36:/mipmap-anydpi-v26/ic_launcher_round.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/drawable_bg_tag_del.xml.flat",
+        "source": "com.keyspirit.app-main-36:/drawable/bg_tag_del.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "com.keyspirit.app-main-36:/mipmap-anydpi-v26/ic_launcher.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/layout_item_script.xml.flat",
+        "source": "com.keyspirit.app-main-36:/layout/item_script.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/layout_activity_main.xml.flat",
+        "source": "com.keyspirit.app-main-36:/layout/activity_main.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/drawable_bg_tab_inactive.xml.flat",
+        "source": "com.keyspirit.app-main-36:/drawable/bg_tab_inactive.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/drawable_ic_launcher_background.xml.flat",
+        "source": "com.keyspirit.app-main-36:/drawable/ic_launcher_background.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/drawable_bg_tab_active.xml.flat",
+        "source": "com.keyspirit.app-main-36:/drawable/bg_tab_active.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/xml_accessibility_service_config.xml.flat",
+        "source": "com.keyspirit.app-main-36:/xml/accessibility_service_config.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "com.keyspirit.app-main-36:/drawable/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/drawable_bg_step_num.xml.flat",
+        "source": "com.keyspirit.app-main-36:/drawable/bg_step_num.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/drawable_bg_tag_play.xml.flat",
+        "source": "com.keyspirit.app-main-36:/drawable/bg_tag_play.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/layout_activity_settings.xml.flat",
+        "source": "com.keyspirit.app-main-36:/layout/activity_settings.xml"
+    },
+    {
+        "merged": "com.keyspirit.app-debug-34:/layout_item_step.xml.flat",
+        "source": "com.keyspirit.app-main-36:/layout/item_step.xml"
+    }
+]
