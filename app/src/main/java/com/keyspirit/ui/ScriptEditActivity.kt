@@ -212,13 +212,42 @@ class ScriptEditActivity : AppCompatActivity() {
                 // 存引用用于读取
                 conditionSpinnerRef = spinner
 
-                inputs["conditionImagePath"] = addInput(layout, "目标图片路径", step.conditionImagePath)
-                addConditionImagePickerButton(layout, inputs["conditionImagePath"]!!)
-                inputs["conditionSimilarity"] = addInput(layout, "相似度(0-1)", step.conditionSimilarity.toString())
-                inputs["conditionText"] = addInput(layout, "目标文字", step.conditionText)
+                // 找图相关字段
+                val tvImgPath = addInput(layout, "目标图片路径", step.conditionImagePath)
+                inputs["conditionImagePath"] = tvImgPath
+                val btnPickImg = addConditionImagePickerButton(layout, tvImgPath)
+                val tvSim = addInput(layout, "相似度(0-1)", step.conditionSimilarity.toString())
+                inputs["conditionSimilarity"] = tvSim
+
+                // 找文字相关字段
+                val tvText = addInput(layout, "目标文字", step.conditionText)
+                inputs["conditionText"] = tvText
+
+                // 共用字段
                 inputs["conditionTimeout"] = addInput(layout, "超时时间(ms)", step.conditionTimeout.toString())
                 inputs["ifTrueJump"] = addInput(layout, "成立时跳转到步骤(填0=继续)", if (step.ifTrueJump < 0) "0" else (step.ifTrueJump + 1).toString())
                 inputs["ifFalseJump"] = addInput(layout, "不成立时跳转到步骤(填0=继续)", if (step.ifFalseJump < 0) "0" else (step.ifFalseJump + 1).toString())
+
+                // 找图相关View集合（用于动态显隐）
+                val imageViews = listOf(tvImgPath, btnPickImg, tvSim)
+                // 找文字相关View集合
+                val textViews = listOf(tvText)
+
+                fun updateIfVisibility(condType: Int) {
+                    val isImage = condType == 0 || condType == 2
+                    val isText = condType == 1 || condType == 3
+                    imageViews.forEach { it.visibility = if (isImage) View.VISIBLE else View.GONE }
+                    textViews.forEach { it.visibility = if (isText) View.VISIBLE else View.GONE }
+                }
+
+                spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        updateIfVisibility(position)
+                    }
+                    override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+                }
+                // 初始化可见性
+                updateIfVisibility(step.conditionType)
             }
         }
 
@@ -325,8 +354,9 @@ class ScriptEditActivity : AppCompatActivity() {
 
     /**
      * 添加"从项目目录选择图片"按钮，点击后列出当前项目截图目录的所有图片
+     * @return 创建的按钮 View
      */
-    private fun addImagePickerButton(parent: LinearLayout, targetInput: EditText) {
+    private fun addImagePickerButton(parent: LinearLayout, targetInput: EditText): android.widget.Button {
         val btn = android.widget.Button(this).apply {
             text = "从项目目录选择图片"
             setOnClickListener {
@@ -348,12 +378,14 @@ class ScriptEditActivity : AppCompatActivity() {
             }
         }
         parent.addView(btn)
+        return btn
     }
 
     /**
      * 条件判断的选图按钮
+     * @return 创建的按钮 View
      */
-    private fun addConditionImagePickerButton(parent: LinearLayout, targetInput: EditText) {
+    private fun addConditionImagePickerButton(parent: LinearLayout, targetInput: EditText): android.widget.Button {
         val btn = android.widget.Button(this).apply {
             text = "从项目目录选择图片"
             setOnClickListener {
@@ -375,6 +407,7 @@ class ScriptEditActivity : AppCompatActivity() {
             }
         }
         parent.addView(btn)
+        return btn
     }
 
     /**

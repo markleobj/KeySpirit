@@ -1031,31 +1031,20 @@ class FloatingWindowService : Service() {
         // 条件类型选择
         val conditionOptions = arrayOf("找到图片", "找到文字", "找不到图片", "找不到文字")
         var selectedCondition = existingStep?.conditionType ?: 0
+
         val tvCondition = android.widget.TextView(this).apply {
             text = "条件类型"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 13f
         }
         innerLayout.addView(tvCondition)
+
         val btnCondition = android.widget.Button(this).apply {
             text = conditionOptions[selectedCondition]
-            setOnClickListener {
-                android.app.AlertDialog.Builder(this@FloatingWindowService)
-                    .setTitle("选择条件类型")
-                    .setItems(conditionOptions) { _, which ->
-                        selectedCondition = which
-                        text = conditionOptions[which]
-                    }
-                    .create()
-                    .apply {
-                        window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
-                    }
-                    .show()
-            }
         }
         innerLayout.addView(btnCondition)
 
-        // 图片路径（找图条件用）
+        // ---- 找图相关字段 ----
         val tvImg = android.widget.TextView(this).apply {
             text = "目标图片路径"
             setTextColor(android.graphics.Color.parseColor("#999999"))
@@ -1070,32 +1059,11 @@ class FloatingWindowService : Service() {
         }
         innerLayout.addView(etImgPath)
 
-        // 选图按钮
         val btnPickImg = android.widget.Button(this).apply {
             text = "从项目目录选择图片"
-            setOnClickListener {
-                val scriptId = script.id
-                val screenshots = com.keyspirit.util.ScreenshotUtils.listProjectScreenshots(this@FloatingWindowService, scriptId)
-                if (screenshots.isEmpty()) {
-                    toast("项目目录下还没有截图，请先用悬浮窗截图")
-                    return@setOnClickListener
-                }
-                val fileNames = screenshots.map { it.name }.toTypedArray()
-                android.app.AlertDialog.Builder(this@FloatingWindowService)
-                    .setTitle("选择图片")
-                    .setItems(fileNames) { _, which ->
-                        etImgPath.setText(screenshots[which].absolutePath)
-                    }
-                    .create()
-                    .apply {
-                        window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
-                    }
-                    .show()
-            }
         }
         innerLayout.addView(btnPickImg)
 
-        // 相似度（找图条件用）
         val tvSim = android.widget.TextView(this).apply {
             text = "相似度 (0-1)"
             setTextColor(android.graphics.Color.parseColor("#999999"))
@@ -1109,8 +1077,9 @@ class FloatingWindowService : Service() {
             setSingleLine()
         }
         innerLayout.addView(etSim)
+        // ---- 找图相关字段结束 ----
 
-        // 目标文字（找文字条件用）
+        // ---- 找文字相关字段 ----
         val tvText = android.widget.TextView(this).apply {
             text = "目标文字"
             setTextColor(android.graphics.Color.parseColor("#999999"))
@@ -1124,8 +1093,9 @@ class FloatingWindowService : Service() {
             setSingleLine()
         }
         innerLayout.addView(etText)
+        // ---- 找文字相关字段结束 ----
 
-        // 超时时间
+        // 超时时间（共用）
         val tvTimeout = android.widget.TextView(this).apply {
             text = "超时时间(ms)"
             setTextColor(android.graphics.Color.parseColor("#999999"))
@@ -1180,28 +1150,107 @@ class FloatingWindowService : Service() {
         }
         innerLayout.addView(tvHint)
 
+        // 根据条件类型更新字段可见性
+        fun updateVisibility(condType: Int) {
+            val isImageType = condType == 0 || condType == 2
+            val isTextType = condType == 1 || condType == 3
+            val imgVisibility = if (isImageType) View.VISIBLE else View.GONE
+            val textVisibility = if (isTextType) View.VISIBLE else View.GONE
+
+            tvImg.visibility = imgVisibility
+            etImgPath.visibility = imgVisibility
+            btnPickImg.visibility = imgVisibility
+            tvSim.visibility = imgVisibility
+            etSim.visibility = imgVisibility
+
+            tvText.visibility = textVisibility
+            etText.visibility = textVisibility
+
+            tvHint.text = when (condType) {
+                0 -> "用法示例：如果找到图片，就跳转到第5步（执行后续任务）；找不到就跳转到第1步（重试）"
+                1 -> "用法示例：如果找到文字，就跳转到第3步（执行后续任务）；找不到就跳转到第1步（重试）"
+                2 -> "用法示例：如果找不到图片，就跳转到第1步（重试）；找到了就继续下一步"
+                else -> "用法示例：如果找不到文字，就跳转到第1步（重试）；找到了就继续下一步"
+            }
+        }
+
+        // 条件类型选择按钮点击
+        btnCondition.setOnClickListener {
+            try {
+                android.app.AlertDialog.Builder(this@FloatingWindowService)
+                    .setTitle("选择条件类型")
+                    .setItems(conditionOptions) { _, which ->
+                        selectedCondition = which
+                        btnCondition.text = conditionOptions[which]
+                        updateVisibility(which)
+                    }
+                    .create()
+                    .apply {
+                        window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                    }
+                    .show()
+            } catch (e: Exception) {
+                Log.e(TAG, "条件类型选择按钮异常", e)
+                toast("操作失败: ${e.message}")
+            }
+        }
+
+        // 选图按钮点击
+        btnPickImg.setOnClickListener {
+            try {
+                val scriptId = script.id
+                val screenshots = com.keyspirit.util.ScreenshotUtils.listProjectScreenshots(this@FloatingWindowService, scriptId)
+                if (screenshots.isEmpty()) {
+                    toast("项目目录下还没有截图，请先用悬浮窗截图")
+                    return@setOnClickListener
+                }
+                val fileNames = screenshots.map { it.name }.toTypedArray()
+                android.app.AlertDialog.Builder(this@FloatingWindowService)
+                    .setTitle("选择图片")
+                    .setItems(fileNames) { _, which ->
+                        etImgPath.setText(screenshots[which].absolutePath)
+                    }
+                    .create()
+                    .apply {
+                        window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                    }
+                    .show()
+            } catch (e: Exception) {
+                Log.e(TAG, "选图按钮异常", e)
+                toast("选图失败: ${e.message}")
+            }
+        }
+
+        // 初始化可见性
+        updateVisibility(selectedCondition)
+
         android.app.AlertDialog.Builder(this)
             .setTitle(if (existingStep == null) "添加条件判断" else "编辑条件判断")
             .setView(layout)
             .setPositiveButton("确定") { _, _ ->
-                val step = existingStep ?: ScriptStep(type = StepType.IF)
-                step.conditionType = selectedCondition
-                step.conditionImagePath = etImgPath.text.toString()
-                step.conditionText = etText.text.toString()
-                step.conditionSimilarity = etSim.text.toString().toDoubleOrNull() ?: 0.9
-                step.conditionTimeout = etTimeout.text.toString().toLongOrNull() ?: 2000
+                try {
+                    val step = existingStep ?: ScriptStep(type = StepType.IF)
+                    step.conditionType = selectedCondition
+                    step.conditionImagePath = etImgPath.text.toString()
+                    step.conditionText = etText.text.toString()
+                    step.conditionSimilarity = etSim.text.toString().toDoubleOrNull() ?: 0.9
+                    step.conditionTimeout = etTimeout.text.toString().toLongOrNull() ?: 2000
 
-                val trueJump = etTrueJump.text.toString().toIntOrNull() ?: 0
-                step.ifTrueJump = if (trueJump <= 0) -1 else (trueJump - 1).coerceIn(0, totalSteps)
+                    val trueJump = etTrueJump.text.toString().toIntOrNull() ?: 0
+                    step.ifTrueJump = if (trueJump <= 0) -1 else (trueJump - 1).coerceIn(0, totalSteps)
 
-                val falseJump = etFalseJump.text.toString().toIntOrNull() ?: 0
-                step.ifFalseJump = if (falseJump <= 0) -1 else (falseJump - 1).coerceIn(0, totalSteps)
+                    val falseJump = etFalseJump.text.toString().toIntOrNull() ?: 0
+                    step.ifFalseJump = if (falseJump <= 0) -1 else (falseJump - 1).coerceIn(0, totalSteps)
 
-                if (existingStep == null) {
-                    script.steps.add(step)
+                    if (existingStep == null) {
+                        script.steps.add(step)
+                    }
+                    editorView?.refreshStepList()
+                    toast("已添加条件判断步骤")
+                } catch (e: Exception) {
+                    Log.e(TAG, "保存条件判断失败", e)
+                    toast("保存失败: ${e.message}")
                 }
-                editorView?.refreshStepList()
-                toast("已添加条件判断步骤")
             }
             .setNegativeButton("取消", null)
             .create()
