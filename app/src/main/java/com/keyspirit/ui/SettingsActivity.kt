@@ -125,7 +125,21 @@ class SettingsActivity : AppCompatActivity() {
                 } else {
                     "截屏服务启动失败，请重试"
                 }
-                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                // 用对话框显示完整错误信息，避免 Toast 截断
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("截屏服务启动失败")
+                    .setMessage(error.ifEmpty { "未知错误" })
+                    .setPositiveButton("确定", null)
+                    .setNeutralButton("查看诊断") { _, _ ->
+                        val diag = ScreenCaptureService.instance?.getDiagnosticInfo()
+                            ?: "截屏服务未运行"
+                        androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle("截屏诊断信息")
+                            .setMessage(diag)
+                            .setPositiveButton("确定", null)
+                            .show()
+                    }
+                    .show()
             }
             ScreenCaptureService.STATE_STOPPED -> {
                 switchScreenCapture.isChecked = false

@@ -141,17 +141,32 @@ class ScreenCaptureService : Service() {
         Log.d(TAG, "onStartCommand: resultCode=$resultCode, data=${data != null}")
 
         // Android 14+ 必须在 5 秒内调用 startForeground，否则崩溃。
-        // 所以无论成功失败，都先想办法调到 startForeground，再决定后续。
+        // 而且必须先启动前台服务（声明 mediaProjection 类型），才能创建 MediaProjection。
+        // 所以第一步：先启动前台服务，再创建投影。
 
-        // 第一步：创建 MediaProjection 对象
+        val hasProjectionData = resultCode != 0 && data != null
+
+        // 第一步：立即启动前台服务（必须在 onStartCommand 5秒内调用）
+        // projectionOk=true 时尝试 mediaProjection 类型，否则降级到 specialUse
+        val fgOk = startForegroundRobust(hasProjectionData)
+
+        if (!fgOk) {
+            // startForeground 完全失败，系统会在 5 秒后杀服务，不如主动停止
+            Log.e(TAG, "startForeground 完全失败，停止服务")
+            setState(STATE_ERROR, "无法启动前台服务")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        // 第二步：创建 MediaProjection 对象（必须在 startForeground 之后，Android 14+ 要求）
         var projectionOk = false
         var projectionError = ""
-        if (resultCode == 0 || data == null) {
+        if (!hasProjectionData) {
             projectionError = "截屏授权数据缺失 (resultCode=$resultCode, data=${data != null})"
             Log.e(TAG, "onStartCommand: $projectionError")
         } else {
             try {
-                createMediaProjection(resultCode, data)
+                createMediaProjection(resultCode, data!!)
                 projectionOk = mediaProjection != null
                 if (!projectionOk) {
                     projectionError = "MediaProjection 对象为 null"
@@ -159,18 +174,13 @@ class ScreenCaptureService : Service() {
             } catch (e: Exception) {
                 projectionError = "createMediaProjection 异常: ${e.message}"
                 Log.e(TAG, "createMediaProjection 失败", e)
+                // 打印完整异常链，便于排查
+                var cause: Throwable? = e
+                while (cause != null) {
+                    Log.e(TAG, "  原因: ${cause::class.java.name}: ${cause.message}")
+                    cause = cause.cause
+                }
             }
-        }
-
-        // 第二步：立即启动前台服务（必须在 onStartCommand 5秒内调用）
-        val fgOk = startForegroundRobust(projectionOk)
-
-        if (!fgOk) {
-            // startForeground 完全失败，系统会在 5 秒后杀服务，不如主动停止
-            Log.e(TAG, "startForeground 完全失败，停止服务")
-            setState(STATE_ERROR, "无法启动前台服务: $projectionError")
-            stopSelf()
-            return START_NOT_STICKY
         }
 
         if (!projectionOk) {
