@@ -17,7 +17,9 @@ import com.keyspirit.script.StepType
 /**
  * 悬浮脚本编辑器：按键精灵风格
  * 左边 = 命令面板（所有可用命令，点击即添加）
- * 右边 = 步骤列表（当前脚本步骤，缩进显示 IF 块）
+ * 右边 = 步骤列表（支持折叠/展开的树形结构）
+ *
+ * 循环/判断默认折叠，点击 + 展开显示子步骤，再点 - 折叠
  */
 class FloatingEditorView(context: Context) : LinearLayout(context) {
 
@@ -37,7 +39,7 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
     var listener: EditorListener? = null
     private var script: Script? = null
 
-    // 插入位置：空列表=末尾，非空=插入到该路径的 IF 块末尾
+    // 插入位置：空列表=末尾，非空=插入到该路径的块内
     var insertPath: List<Int> = emptyList()
         set(value) {
             field = value
@@ -47,6 +49,9 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
 
     private val stepContainer: LinearLayout
     private val stepScrollView: ScrollView
+
+    // 记录每个块的展开状态，key = path 的字符串形式
+    private val expandedPaths = mutableSetOf<String>()
 
     // 所有命令分类
     private val commandGroups = listOf(
@@ -109,7 +114,8 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         // ========== 右边：步骤列表 ==========
         val stepPanel = LinearLayout(context).apply {
             orientation = VERTICAL
-            setPadding(dp(R.dimen.spacing_xs), dp(R.dimen.spacing_sm), dp(R.dimen.spacing_sm), dp(R.dimen.spacing_sm))
+            setPadding(dp(R.dimen.spacing_xs), dp(R.dimen.spacing_sm), dp(R.dimen.spacing_sm), dp(R.dimen.spacing_sm)
+            )
             layoutParams = LayoutParams(0, LayoutParams.MATCH_PARENT, 0.65f)
         }
 
@@ -238,27 +244,38 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
     }
 
     /**
-     * 递归渲染一组步骤
+     * 递归渲染一组步骤（树形折叠/展开模式）
      */
     private fun renderSteps(steps: MutableList<ScriptStep>, parentPath: List<Int>, depth: Int) {
         steps.forEachIndexed { index, step ->
             val currentPath = parentPath + index
-            val row = createStepRow(index, step, currentPath, depth)
+            val pathKey = currentPath.joinToString(",")
+
+            // 判断是否是块类型（有子步骤的 LOOP 或 IF）
+            val isBlock = (step.type == StepType.LOOP || step.type == StepType.IF)
+            @Suppress("SENSELESS_COMPARISON")
+            val hasChildren = isBlock && (
+                (step.type == StepType.IF && step.ifSteps != null && step.ifSteps.isNotEmpty()) ||
+                (step.type == StepType.LOOP && step.loopSteps != null && step.loopSteps.isNotEmpty())
+            )
+            val isExpanded = expandedPaths.contains(pathKey)
+
+            // 创建步骤行
+            val row = createStepRow(index, step, currentPath, depth, isBlock, hasChildren, isExpanded)
             stepContainer.addView(row)
 
-            // IF 块的子步骤
-            @Suppress("SENSELESS_COMPARISON")
-            if (step.type == StepType.IF && step.ifSteps != null && step.ifSteps.isNotEmpty()) {
-                renderSteps(step.ifSteps, currentPath, depth + 1)
-                // 添加 IF 结束标记
-                stepContainer.addView(createEndMarker("条件结束", depth))
-            }
-            // LOOP 块的子步骤
-            @Suppress("SENSELESS_COMPARISON")
-            if (step.type == StepType.LOOP && step.loopSteps != null && step.loopSteps.isNotEmpty()) {
-                renderSteps(step.loopSteps, currentPath, depth + 1)
-                // 添加 LOOP 结束标记
-                stepContainer.addView(createEndMarker("循环结束", depth))
+            // 如果是展开状态且有子步骤，递归渲染子步骤
+            if (isBlock && isExpanded && hasChildren) {
+                val childSteps = when (step.type) {
+                    StepType.IF -> step.ifSteps
+                    StepType.LOOP -> step.loopSteps
+                    else -> mutableListOf()
+                }
+                renderSteps(childSteps, currentPath, depth + 1)
+
+                // 添加结束标记
+                val endText = if (step.type == StepType.IF) "条件结束" else "循环结束"
+                stepContainer.addView(createEndMarker(endText, depth))
             }
         }
     }
@@ -279,11 +296,19 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         }
     }
 
+    /**
+     * 创建步骤行
+     * 块类型（LOOP/IF）有折叠/展开按钮（+/−）
+     * 非块类型只有编辑/删除按钮
+     */
     private fun createStepRow(
         index: Int,
         step: ScriptStep,
         path: List<Int>,
-        depth: Int
+        depth: Int,
+        isBlock: Boolean,
+        hasChildren: Boolean,
+        isExpanded: Boolean
     ): View {
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
@@ -313,6 +338,35 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             }
         }
 
+        // 块类型：折叠/展开按钮（+/−）
+        if (isBlock) {
+            val toggleBtn = TextView(context).apply {
+                text = if (isExpanded) "−" else "+"
+                setTextColor(if (hasChildren) Color.parseColor("#F39C12") else Color.parseColor("#555555"))
+                textSize = sp(R.dimen.editor_step_text_size)
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setPadding(dp(R.dimen.spacing_xs), 0, dp(R.dimen.spacing_xs), 0)
+                setOnClickListener {
+                    val pathKey = path.joinToString(",")
+                    if (expandedPaths.contains(pathKey)) {
+                        expandedPaths.remove(pathKey)
+                    } else {
+                        expandedPaths.add(pathKey)
+                    }
+                    refreshStepList()
+                }
+            }
+            row.addView(toggleBtn)
+        } else {
+            // 非块类型：占位空格保持对齐
+            val spacer = TextView(context).apply {
+                text = " "
+                textSize = sp(R.dimen.editor_step_text_size)
+                setPadding(dp(R.dimen.spacing_xs), 0, dp(R.dimen.spacing_xs), 0)
+            }
+            row.addView(spacer)
+        }
+
         // 序号
         val prefix = if (depth > 0) "└ " else ""
         val num = TextView(context).apply {
@@ -321,6 +375,7 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             textSize = sp(R.dimen.editor_step_desc_size)
             setPadding(dp(R.dimen.spacing_xs), 0, dp(R.dimen.spacing_xs), 0)
         }
+        row.addView(num)
 
         // 步骤信息
         val infoLayout = LinearLayout(context).apply {
@@ -344,25 +399,23 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         }
         infoLayout.addView(tvType)
         infoLayout.addView(tvDesc)
+        row.addView(infoLayout)
 
-        // IF 和 LOOP 类型加一个「设为插入点」按钮
-        if (step.type == StepType.IF || step.type == StepType.LOOP) {
+        // 块类型：设为插入点按钮
+        if (isBlock) {
             val btnInsert = TextView(context).apply {
-                text = "+子"
+                text = "插入"
                 setTextColor(Color.parseColor("#2ECC71"))
                 textSize = sp(R.dimen.editor_step_desc_size)
                 setPadding(dp(R.dimen.editor_step_padding_h), 0, dp(R.dimen.editor_step_padding_h), 0)
                 setOnClickListener {
                     insertPath = path
-                    updateInsertLabel()
+                    // 自动展开此块
+                    expandedPaths.add(path.joinToString(","))
+                    refreshStepList()
                 }
             }
-            row.addView(num)
-            row.addView(infoLayout)
             row.addView(btnInsert)
-        } else {
-            row.addView(num)
-            row.addView(infoLayout)
         }
 
         // 编辑/删除
