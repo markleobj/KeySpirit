@@ -11,8 +11,8 @@ android {
         applicationId = "com.keyspirit"
         minSdk = 24
         targetSdk = 34
-        versionCode = 46
-        versionName = "1.13.0"
+        versionCode = 47
+        versionName = "1.13.1"
     }
 
     signingConfigs {
@@ -21,6 +21,8 @@ android {
             storePassword = "keyspirit123"
             keyAlias = "keyspirit"
             keyPassword = "keyspirit123"
+            enableV1Signing = true
+            enableV2Signing = true
         }
     }
 
