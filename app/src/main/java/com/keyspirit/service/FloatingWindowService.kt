@@ -1922,6 +1922,7 @@ class FloatingWindowService : Service() {
         container.setOnTouchListener { _, event ->
             val rx = event.rawX
             val ry = event.rawY
+
             // 更新坐标文本
             coordTextView?.text = "触摸坐标: (${rx.toInt()}, ${ry.toInt()})"
             // 更新指示器位置（以触摸点为中心）
@@ -1932,7 +1933,7 @@ class FloatingWindowService : Service() {
             }
             android.util.Log.d("RecordTouch", "action=${event.action} rawX=${rx} rawY=${ry}")
             touchRecorder.onTouchEvent(event)
-            touchRecorder.dispatchToApp(event)
+
             true
         }
 
@@ -2484,65 +2485,221 @@ class FloatingWindowService : Service() {
     }
 
     private fun takeScreenshot() {
-        // 先检查截屏服务，不要急着隐藏面板
+        // 预检查：截屏服务必须运行
         if (!com.keyspirit.service.ScreenCaptureService.isRunning()) {
-            val error = com.keyspirit.service.ScreenCaptureService.getError()
             val state = com.keyspirit.service.ScreenCaptureService.getState()
+            val error = com.keyspirit.service.ScreenCaptureService.getError()
             val message = buildString {
-                append("截屏服务未启动，无法截图。\n\n")
-                append("请先去设置页开启「截屏权限」。\n\n")
-                append("当前状态：")
-                append(when (state) {
-                    com.keyspirit.service.ScreenCaptureService.STATE_ERROR -> "错误 - ${error.ifEmpty { "未知错误" }}"
-                    com.keyspirit.service.ScreenCaptureService.STATE_STARTING -> "正在启动中"
-                    com.keyspirit.service.ScreenCaptureService.STATE_STOPPED -> "未启动"
-                    com.keyspirit.service.ScreenCaptureService.STATE_RUNNING -> "运行中"
-                    else -> "未知"
-                })
-            }
-            android.app.AlertDialog.Builder(this)
-                .setTitle("无法截图")
-                .setMessage(message)
-                .setPositiveButton("知道了", null)
-                .create()
-                .apply {
-                    window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                append("截图功能需要截屏权限。")
+                when (state) {
+                    com.keyspirit.service.ScreenCaptureService.STATE_ERROR -> {
+                        append("\n\n截屏服务启动失败：")
+                        append(error.ifEmpty { "未知错误" })
+                        append("\n\n请返回设置页重新授权截屏权限。")
+                    }
+                    com.keyspirit.service.ScreenCaptureService.STATE_STARTING -> {
+                        append("\n\n截屏服务正在启动中，请稍候再试。")
+                    }
+                    else -> {
+                        append("\n\n请返回设置页，开启截屏权限后再试。")
+                    }
                 }
-                .show()
+            }
+            showAlertDialog(
+                title = "截屏服务未启动",
+                message = message,
+                positive = "知道了"
+            )
             return
         }
-        val service = com.keyspirit.service.ScreenCaptureService.instance ?: return
-        // 截屏服务正常，隐藏面板和悬浮球后截图
+
+        // 隐藏面板和悬浮球，准备区域选取
         val wasPanelVisible = isPanelVisible
         hidePanel()
-        toast("正在截图...")
-        // 截图前隐藏所有悬浮元素，确保截图准确
         floatingBall?.visibility = View.GONE
         pickerToastView?.let {
             try { windowManager.removeView(it) } catch (_: Exception) {}
             pickerToastView = null
         }
-        // 在后台线程截屏（captureScreen 是同步阻塞方法）
-        Thread {
-            try {
-                // 等待屏幕刷新（悬浮元素移除后）
-                Thread.sleep(500)
 
-                val bitmap = service.captureScreen()
-                // 截图完成后恢复悬浮球和面板
-                handler.post {
+        // 显示区域选取覆盖层（虚线框选择截图区域）
+        val overlay = object : View(this) {
+            private var startX = 0f
+            private var startY = 0f
+            private var curX = 0f
+            private var curY = 0f
+            private var dragging = false
+            private val dashPaint = android.graphics.Paint().apply {
+                color = android.graphics.Color.parseColor("#E74C3C")
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = 6f
+                pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 12f), 0f)
+            }
+
+            override fun onDraw(canvas: android.graphics.Canvas) {
+                super.onDraw(canvas)
+                if (dragging) {
+                    val left = Math.min(startX, curX)
+                    val top = Math.min(startY, curY)
+                    val right = Math.max(startX, curX)
+                    val bottom = Math.max(startY, curY)
+                    canvas.drawRect(left, top, right, bottom, dashPaint)
+                }
+            }
+
+            override fun onTouchEvent(event: MotionEvent): Boolean {
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        startX = event.rawX
+                        startY = event.rawY
+                        curX = event.rawX
+                        curY = event.rawY
+                        dragging = true
+                        invalidate()
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        curX = event.rawX
+                        curY = event.rawY
+                        invalidate()
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val left = Math.min(startX, event.rawX).toInt()
+                        val top = Math.min(startY, event.rawY).toInt()
+                        val right = Math.max(startX, event.rawX).toInt()
+                        val bottom = Math.max(startY, event.rawY).toInt()
+                        dragging = false
+                        try { windowManager.removeView(this) } catch (_: Exception) {}
+                        pickerOverlay = null
+
+                        if (right - left < 20 || bottom - top < 20) {
+                            // 区域太小，恢复界面
+                            floatingBall?.visibility = View.VISIBLE
+                            if (wasPanelVisible) {
+                                showPanel()
+                            }
+                            toast("区域太小，请重新选择")
+                            return true
+                        }
+                        // 弹出命名对话框
+                        showStandaloneScreenshotNameDialog(left, top, right, bottom, wasPanelVisible)
+                    }
+                }
+                return true
+            }
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        try {
+            windowManager.addView(overlay, params)
+            pickerOverlay = overlay
+        } catch (e: Exception) {
+            floatingBall?.visibility = View.VISIBLE
+            if (wasPanelVisible) {
+                showPanel()
+            }
+            toast("无法显示选取层: ${e.message}")
+        }
+
+        // 提示用户
+        toast("请拖动选择截图区域")
+    }
+
+    /**
+     * 独立截图的命名对话框（不关联编辑器，直接保存到项目）
+     */
+    private fun showStandaloneScreenshotNameDialog(
+        left: Int, top: Int, right: Int, bottom: Int,
+        wasPanelVisible: Boolean
+    ) {
+        val input = android.widget.EditText(this).apply {
+            hint = "请输入图片名称（如：登录按钮、标题栏）"
+            setSingleLine()
+            setPadding(32, 24, 32, 24)
+        }
+        android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setTitle("命名截图")
+            .setMessage("给这张截图起个名字，方便后续找图时复用")
+            .setView(input)
+            .setPositiveButton("确定") { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isEmpty()) {
+                    toast("请输入名称")
                     floatingBall?.visibility = View.VISIBLE
                     if (wasPanelVisible) {
                         showPanel()
                     }
+                    return@setPositiveButton
                 }
+                // 执行截图并保存
+                captureStandaloneScreenshot(left, top, right, bottom, name, wasPanelVisible)
+            }
+            .setNegativeButton("取消") { _, _ ->
+                floatingBall?.visibility = View.VISIBLE
+                if (wasPanelVisible) {
+                    showPanel()
+                }
+            }
+            .create()
+            .apply {
+                window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                setCancelable(false)
+            }
+            .show()
+    }
+
+    /**
+     * 截取指定区域并保存为命名图片（独立截图，不关联脚本步骤）
+     */
+    private fun captureStandaloneScreenshot(
+        left: Int, top: Int, right: Int, bottom: Int,
+        name: String,
+        wasPanelVisible: Boolean
+    ) {
+        val service = com.keyspirit.service.ScreenCaptureService.instance ?: run {
+            floatingBall?.visibility = View.VISIBLE
+            if (wasPanelVisible) {
+                showPanel()
+            }
+            toast("截屏服务异常")
+            return
+        }
+        toast("正在截图...")
+
+        Thread {
+            try {
+                Thread.sleep(300)
+                val bitmap = service.captureScreen()
                 if (bitmap == null) {
                     handler.post {
-                        toast("截屏失败\n${service.getDiagnosticInfo()}", long = true)
+                        floatingBall?.visibility = View.VISIBLE
+                        if (wasPanelVisible) {
+                            showPanel()
+                        }
+                        showAlertDialog(
+                            title = "截图失败",
+                            message = "截屏返回为空图片。\n\n诊断信息：${service.getDiagnosticInfo()}",
+                            positive = "知道了"
+                        )
                     }
                     return@Thread
                 }
-                // 如果没有当前项目，让用户命名保存
+                val cropLeft = left.coerceIn(0, bitmap.width - 1)
+                val cropTop = top.coerceIn(0, bitmap.height - 1)
+                val cropRight = right.coerceIn(cropLeft + 1, bitmap.width)
+                val cropBottom = bottom.coerceIn(cropTop + 1, bitmap.height)
+                val cropped = android.graphics.Bitmap.createBitmap(
+                    bitmap, cropLeft, cropTop,
+                    cropRight - cropLeft, cropBottom - cropTop
+                )
+
+                // 确保有当前项目，没有则创建默认项目
                 var scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
                 var scriptName = com.keyspirit.util.CurrentProjectHolder.currentScriptName
                 if (scriptId == null) {
@@ -2553,22 +2710,40 @@ class FloatingWindowService : Service() {
                     com.keyspirit.util.CurrentProjectHolder.currentScriptId = scriptId
                     com.keyspirit.util.CurrentProjectHolder.currentScriptName = scriptName
                 }
-                val path = com.keyspirit.util.ScreenshotUtils.saveToProject(this, bitmap, scriptId)
-                handler.post {
-                    if (path != null) {
-                        toast("已保存到【$scriptName】: ${path.substringAfterLast('/')}")
-                    } else {
-                        toast("截图保存失败")
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("FloatingWindow", "截图线程异常", e)
+
+                // 用用户命名保存
+                val safeName = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                val path = com.keyspirit.util.ScreenshotUtils.saveToProject(
+                    this@FloatingWindowService, cropped, scriptId, safeName
+                )
+
                 handler.post {
                     floatingBall?.visibility = View.VISIBLE
                     if (wasPanelVisible) {
                         showPanel()
                     }
-                    toast("截图异常: ${e.message}", long = true)
+                    if (path != null) {
+                        toast("✓ 已保存到【$scriptName】: $safeName (${cropped.width}x${cropped.height})")
+                    } else {
+                        showAlertDialog(
+                            title = "截图保存失败",
+                            message = "图片写入失败，可能是存储空间不足。",
+                            positive = "知道了"
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("FloatingWindow", "独立截图异常", e)
+                handler.post {
+                    floatingBall?.visibility = View.VISIBLE
+                    if (wasPanelVisible) {
+                        showPanel()
+                    }
+                    showAlertDialog(
+                        title = "截图异常",
+                        message = "截图过程中发生异常：${e.message}\n\n${e.stackTrace.take(3).joinToString("\n") { it.toString() }}",
+                        positive = "知道了"
+                    )
                 }
             }
         }.start()
