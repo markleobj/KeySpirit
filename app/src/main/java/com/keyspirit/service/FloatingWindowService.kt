@@ -269,6 +269,7 @@ class FloatingWindowService : Service() {
     private var pendingStepType: StepType? = null
     // 待添加步骤的路径（空列表表示根级别，非空表示添加到某个 IF 块内）
     private var pendingAddPath: List<Int> = emptyList()
+    private var pendingInsertAfter: Boolean = true  // true=之后插入, false=之前插入
 
     /**
      * 确保 editingScript 存在且 steps 不为 null
@@ -322,8 +323,8 @@ class FloatingWindowService : Service() {
         editorView = com.keyspirit.floating.FloatingEditorView(this).apply {
             setScript(script)
             listener = object : com.keyspirit.floating.FloatingEditorView.EditorListener {
-                override fun onAddCommand(type: StepType, path: List<Int>) {
-                    handleAddStep(type, path)
+                override fun onAddCommand(type: StepType, selectedPath: List<Int>?) {
+                    handleAddStep(type, selectedPath)
                 }
                 override fun onEditStep(path: List<Int>, step: ScriptStep) {
                     // 编辑步骤：根据类型重新交互式设置
@@ -348,8 +349,7 @@ class FloatingWindowService : Service() {
                     val index = path.last()
                     if (parentList != null && index in parentList.indices) {
                         parentList.removeAt(index)
-                        // 删除后检查并修正插入路径
-                        fixInsertPathAfterDelete(path)
+                        editorView?.clearSelection()
                         editorView?.refreshStepList()
                     } else {
                         toast("删除失败：步骤路径无效")
@@ -508,13 +508,46 @@ class FloatingWindowService : Service() {
     }
 
     /**
-     * 处理添加步骤：根据类型进入不同的交互式选取流程
+     * 处理添加步骤：根据是否选中步骤，决定直接添加还是弹"之前/之后"选择
      */
-    private fun handleAddStep(type: StepType, path: List<Int> = emptyList()) {
+    private fun handleAddStep(type: StepType, selectedPath: List<Int>?) {
         pendingStepType = type
-        pendingAddPath = path
-        val script = ensureEditingScript()
-        Log.d(TAG, "handleAddStep: type=$type, path=$path, current steps=${script.steps.size}")
+        if (selectedPath == null) {
+            // 未选中步骤，添加到末尾
+            pendingAddPath = emptyList()
+            pendingInsertAfter = true
+            proceedWithCommand(type)
+        } else {
+            // 选中了步骤，弹出"之前/之后"选择
+            val step = getStepByPath(selectedPath)
+            val desc = step?.getDescription() ?: "未知"
+            val stepType = step?.type?.displayName ?: "步骤"
+            android.app.AlertDialog.Builder(this)
+                .setTitle("插入位置")
+                .setMessage("在「$stepType: $desc」之前或之后插入？")
+                .setPositiveButton("之后") { _, _ ->
+                    pendingAddPath = selectedPath
+                    pendingInsertAfter = true
+                    proceedWithCommand(type)
+                }
+                .setNegativeButton("之前") { _, _ ->
+                    pendingAddPath = selectedPath
+                    pendingInsertAfter = false
+                    proceedWithCommand(type)
+                }
+                .setNeutralButton("取消", null)
+                .create()
+                .apply {
+                    window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                }
+                .show()
+        }
+    }
+
+    /**
+     * 根据类型进入不同的交互式选取流程
+     */
+    private fun proceedWithCommand(type: StepType) {
         when (type) {
             StepType.CLICK, StepType.LONG_PRESS,
             StepType.TOUCH_DOWN, StepType.TOUCH_UP,
@@ -528,61 +561,56 @@ class FloatingWindowService : Service() {
             StepType.LOOP -> showLoopDialog(null)
             StepType.IF -> showIfDialog(null)
             else -> {
-                // 其他类型直接添加空步骤
-                addStepToPath(ScriptStep(type = type), path)
+                insertStep(ScriptStep(type = type), pendingAddPath, pendingInsertAfter)
+                editorView?.clearSelection()
                 editorView?.refreshStepList()
             }
         }
     }
 
     /**
-     * 将步骤添加到指定路径的父列表末尾
-     * path = [] → 根级别（script.steps）
-     * path = [2] → 第3个步骤是 IF，加到它的 ifSteps 里
-     * path = [2, 1] → 第3个步骤的ifSteps中第2个是 IF，加到内层 ifSteps 里
+     * 插入步骤到指定路径的之前或之后
+     * path = [] → 根级别末尾
+     * path = [2], after=true → 第3个步骤之后
+     * path = [2], after=false → 第3个步骤之前
+     * 如果目标步骤是 LOOP/IF 且 after=true → 插入到该块的子步骤列表开头（进入块内）
      */
-    private fun addStepToPath(step: ScriptStep, path: List<Int>) {
+    private fun insertStep(step: ScriptStep, path: List<Int>, isAfter: Boolean) {
         val script = ensureEditingScript()
         if (path.isEmpty()) {
             script.steps.add(step)
             return
         }
-        var currentList: MutableList<ScriptStep> = script.steps
-        for (i in path.indices) {
-            val idx = path[i]
-            if (idx !in currentList.indices) {
-                Log.e(TAG, "addStepToPath: 路径无效 $path，索引 $idx 越界")
-                toast("添加失败：插入位置无效，已改加到末尾")
-                script.steps.add(step) // 兜底
-                return
-            }
-            val parentStep = currentList[idx]
-            // 支持 IF 和 LOOP 两种块类型
-            val childList = when (parentStep.type) {
-                StepType.IF -> {
-                    @Suppress("SENSELESS_COMPARISON")
-                    if (parentStep.ifSteps == null) parentStep.ifSteps = mutableListOf()
-                    parentStep.ifSteps
-                }
+        val parentPath = path.dropLast(1)
+        val targetIdx = path.last()
+        val parentList = if (parentPath.isEmpty()) script.steps else getStepListByPath(parentPath)
+        if (targetIdx !in parentList.indices) {
+            Log.e(TAG, "insertStep: 路径无效 $path")
+            script.steps.add(step)
+            return
+        }
+        val targetStep = parentList[targetIdx]
+        // 如果目标是块(LOOP/IF)且选"之后"，插入到块内子步骤开头
+        if (isAfter && (targetStep.type == StepType.LOOP || targetStep.type == StepType.IF)) {
+            val childList = when (targetStep.type) {
                 StepType.LOOP -> {
                     @Suppress("SENSELESS_COMPARISON")
-                    if (parentStep.loopSteps == null) parentStep.loopSteps = mutableListOf()
-                    parentStep.loopSteps
+                    if (targetStep.loopSteps == null) targetStep.loopSteps = mutableListOf()
+                    targetStep.loopSteps
                 }
-                else -> {
-                    Log.e(TAG, "addStepToPath: 路径无效 $path，第 $i 层不是 IF/LOOP 类型")
-                    toast("添加失败：插入位置不是条件/循环块，已改加到末尾")
-                    script.steps.add(step) // 兜底
-                    return
+                StepType.IF -> {
+                    @Suppress("SENSELESS_COMPARISON")
+                    if (targetStep.ifSteps == null) targetStep.ifSteps = mutableListOf()
+                    targetStep.ifSteps
                 }
+                else -> parentList
             }
-            if (i == path.size - 1) {
-                // 到达目标父层，添加进去
-                childList.add(step)
-                return
-            }
-            // 继续深入
-            currentList = childList
+            childList.add(0, step)
+            Log.d(TAG, "insertStep: 插入到块 $targetIdx 的子步骤开头")
+        } else {
+            val insertIdx = if (isAfter) targetIdx + 1 else targetIdx
+            parentList.add(insertIdx.coerceIn(0, parentList.size), step)
+            Log.d(TAG, "insertStep: 插入到 $insertIdx (target=$targetIdx, after=$isAfter)")
         }
     }
 
@@ -612,55 +640,6 @@ class FloatingWindowService : Service() {
             }
         }
         return currentList
-    }
-
-    /**
-     * 删除步骤后修正插入路径
-     * 如果插入路径指向被删除的步骤或其后面的步骤，需要调整
-     */
-    private fun fixInsertPathAfterDelete(deletedPath: List<Int>) {
-        val insertPath = editorView?.insertPath ?: return
-        if (insertPath.isEmpty()) return
-
-        // 检查删除的路径是否是插入路径的前缀（即删除了插入位置所在的 IF 块）
-        var isPrefix = true
-        for (i in deletedPath.indices) {
-            if (i >= insertPath.size || insertPath[i] != deletedPath[i]) {
-                isPrefix = false
-                break
-            }
-        }
-        if (isPrefix && insertPath.size >= deletedPath.size) {
-            // 删除了插入位置的父级或更上层，重置到根级别
-            editorView?.resetInsertPosition()
-            toast("插入位置已重置：所在的条件块被删除了")
-            return
-        }
-
-        // 如果删除的是同一层且在插入位置之前或同一位置，调整索引
-        if (insertPath.size == deletedPath.size) {
-            var sameParent = true
-            for (i in 0 until insertPath.size - 1) {
-                if (insertPath[i] != deletedPath[i]) {
-                    sameParent = false
-                    break
-                }
-            }
-            if (sameParent) {
-                val deletedIdx = deletedPath.last()
-                val insertIdx = insertPath.last()
-                if (deletedIdx < insertIdx) {
-                    // 删除的在插入位置前面，插入位置前移
-                    val newPath = insertPath.toMutableList()
-                    newPath[newPath.size - 1] = insertIdx - 1
-                    editorView?.insertPath = newPath
-                } else if (deletedIdx == insertIdx) {
-                    // 删除的就是插入位置，重置到根级别
-                    editorView?.resetInsertPosition()
-                    toast("插入位置已重置：目标位置被删除了")
-                }
-            }
-        }
     }
 
     /**
@@ -696,7 +675,7 @@ class FloatingWindowService : Service() {
                         step.x = x
                         step.y = y
                         if (existingStep == null) {
-                            addStepToPath(step, pendingAddPath)
+                            insertStep(step, pendingAddPath, pendingInsertAfter)
                             Log.d(TAG, "Added ${type.displayName} step at ($x, $y), path=$pendingAddPath")
                         }
                         openEditor()
@@ -762,7 +741,7 @@ class FloatingWindowService : Service() {
                             removePickerOverlay()
                             floatingBall?.visibility = View.VISIBLE
                             if (existingStep == null) {
-                                addStepToPath(swipeStep!!, pendingAddPath)
+                                insertStep(swipeStep!!, pendingAddPath, pendingInsertAfter)
                                 Log.d(TAG, "Added SWIPE step, path=$pendingAddPath")
                             }
                             swipeStep = null
@@ -1009,7 +988,7 @@ class FloatingWindowService : Service() {
                         step.regionBottom = bottom
                         step.useRegion = true
                         if (existingStep == null) {
-                            addStepToPath(step, pendingAddPath)
+                            insertStep(step, pendingAddPath, pendingInsertAfter)
                         }
                         editorView?.refreshStepList()
                         toast("✓ 已保存: $safeName (${cropped.width}x${cropped.height})")
@@ -1229,7 +1208,7 @@ class FloatingWindowService : Service() {
                             step.regionBottom = bottom
                             step.useRegion = true
                             if (existingStep == null) {
-                                addStepToPath(step, pendingAddPath)
+                                insertStep(step, pendingAddPath, pendingInsertAfter)
                                 Log.d(TAG, "Added FIND_IMAGE step, path=$pendingAddPath")
                             }
                             toast("✓ 已截图并保存 (${cropped.width}x${cropped.height})")
@@ -1364,7 +1343,7 @@ class FloatingWindowService : Service() {
                     step.regionBottom = bottom
                     step.useRegion = true
                     if (existingStep == null) {
-                        addStepToPath(step, pendingAddPath)
+                        insertStep(step, pendingAddPath, pendingInsertAfter)
                         Log.d(TAG, "Added FIND_TEXT step, path=$pendingAddPath")
                     }
                 }
@@ -1393,7 +1372,7 @@ class FloatingWindowService : Service() {
                 val step = existingStep ?: ScriptStep(type = StepType.DELAY)
                 step.delay = ms
                 if (existingStep == null) {
-                    addStepToPath(step, pendingAddPath)
+                    insertStep(step, pendingAddPath, pendingInsertAfter)
                     Log.d(TAG, "Added DELAY step, path=$pendingAddPath")
                 }
                 editorView?.refreshStepList()
@@ -1445,19 +1424,10 @@ class FloatingWindowService : Service() {
                 val step = existingStep ?: ScriptStep(type = StepType.LOOP)
                 step.loopCount = count
                 if (existingStep == null) {
-                    addStepToPath(step, pendingAddPath)
+                    insertStep(step, pendingAddPath, pendingInsertAfter)
                     Log.d(TAG, "Added LOOP step, path=$pendingAddPath, count=$count")
-                    // 自动将插入位置设为此循环块，方便用户继续添加子步骤
-                    val newIdx = if (pendingAddPath.isEmpty()) {
-                        ensureEditingScript().steps.size - 1
-                    } else {
-                        // 获取目标列表中的索引
-                        getStepListByPath(pendingAddPath).size - 1
-                    }
-                    val newInsertPath = pendingAddPath + newIdx
-                    editorView?.insertPath = newInsertPath
+                    editorView?.clearSelection()
                     editorView?.refreshStepList()
-                    toast("循环已添加，当前插入位置在循环内，请添加子步骤")
                 } else {
                     editorView?.refreshStepList()
                 }
@@ -1705,7 +1675,7 @@ class FloatingWindowService : Service() {
                     step.ifSteps = ifStepsCopy
 
                     if (existingStep == null) {
-                        addStepToPath(step, pendingAddPath)
+                        insertStep(step, pendingAddPath, pendingInsertAfter)
                     }
                     editorView?.refreshStepList()
                     toast("已保存条件判断步骤")
