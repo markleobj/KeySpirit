@@ -1019,7 +1019,6 @@ class FloatingWindowService : Service() {
      */
     private fun showIfDialog(existingStep: ScriptStep?) {
         val script = ensureEditingScript()
-        val totalSteps = script.steps.size
 
         val layout = android.widget.ScrollView(this)
         val innerLayout = android.widget.LinearLayout(this).apply {
@@ -1031,6 +1030,9 @@ class FloatingWindowService : Service() {
         // 条件类型选择
         val conditionOptions = arrayOf("找到图片", "找到文字", "找不到图片", "找不到文字")
         var selectedCondition = existingStep?.conditionType ?: 0
+        // 条件块内的子步骤（编辑时复制一份，确定后再写回）
+        val ifStepsCopy = (existingStep?.ifSteps?.map { it.copy() }?.toMutableList()
+            ?: mutableListOf())
 
         val tvCondition = android.widget.TextView(this).apply {
             text = "条件类型"
@@ -1110,45 +1112,28 @@ class FloatingWindowService : Service() {
         }
         innerLayout.addView(etTimeout)
 
-        // 条件成立时跳转
-        val tvTrue = android.widget.TextView(this).apply {
-            text = "条件成立时，跳转到步骤（1开始，填0=继续下一步）"
+        // ---- 块内步骤管理 ----
+        val tvBlock = android.widget.TextView(this).apply {
+            text = "条件成立时执行的步骤"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 13f
             setPadding(0, 16, 0, 4)
         }
-        innerLayout.addView(tvTrue)
-        val etTrueJump = android.widget.EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            val jump = existingStep?.ifTrueJump ?: -1
-            setText(if (jump < 0) "0" else (jump + 1).toString())
-            setSingleLine()
-        }
-        innerLayout.addView(etTrueJump)
+        innerLayout.addView(tvBlock)
 
-        // 条件不成立时跳转
-        val tvFalse = android.widget.TextView(this).apply {
-            text = "条件不成立时，跳转到步骤（1开始，填0=继续下一步）"
-            setTextColor(android.graphics.Color.parseColor("#999999"))
-            textSize = 13f
-            setPadding(0, 16, 0, 4)
+        val btnManageSteps = android.widget.Button(this).apply {
+            text = "管理块内步骤（${ifStepsCopy.size}个）"
         }
-        innerLayout.addView(tvFalse)
-        val etFalseJump = android.widget.EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            val jump = existingStep?.ifFalseJump ?: -1
-            setText(if (jump < 0) "0" else (jump + 1).toString())
-            setSingleLine()
-        }
-        innerLayout.addView(etFalseJump)
+        innerLayout.addView(btnManageSteps)
 
         val tvHint = android.widget.TextView(this).apply {
-            text = "用法示例：如果找到图片，就跳转到第5步（执行后续任务）；找不到就跳转到第1步（重试）"
+            text = "条件成立时，按顺序执行块内的所有步骤；不成立则全部跳过"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 12f
-            setPadding(0, 16, 0, 0)
+            setPadding(0, 8, 0, 0)
         }
         innerLayout.addView(tvHint)
+        // ---- 块内步骤管理结束 ----
 
         // 根据条件类型更新字段可见性
         fun updateVisibility(condType: Int) {
@@ -1165,13 +1150,11 @@ class FloatingWindowService : Service() {
 
             tvText.visibility = textVisibility
             etText.visibility = textVisibility
+        }
 
-            tvHint.text = when (condType) {
-                0 -> "用法示例：如果找到图片，就跳转到第5步（执行后续任务）；找不到就跳转到第1步（重试）"
-                1 -> "用法示例：如果找到文字，就跳转到第3步（执行后续任务）；找不到就跳转到第1步（重试）"
-                2 -> "用法示例：如果找不到图片，就跳转到第1步（重试）；找到了就继续下一步"
-                else -> "用法示例：如果找不到文字，就跳转到第1步（重试）；找到了就继续下一步"
-            }
+        // 刷新块内步骤数量显示
+        fun refreshBlockCount() {
+            btnManageSteps.text = "管理块内步骤（${ifStepsCopy.size}个）"
         }
 
         // 条件类型选择按钮点击
@@ -1221,6 +1204,18 @@ class FloatingWindowService : Service() {
             }
         }
 
+        // 管理块内步骤按钮点击
+        btnManageSteps.setOnClickListener {
+            try {
+                showIfBlockStepsDialog(ifStepsCopy) {
+                    refreshBlockCount()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "管理块内步骤异常", e)
+                toast("操作失败: ${e.message}")
+            }
+        }
+
         // 初始化可见性
         updateVisibility(selectedCondition)
 
@@ -1235,18 +1230,13 @@ class FloatingWindowService : Service() {
                     step.conditionText = etText.text.toString()
                     step.conditionSimilarity = etSim.text.toString().toDoubleOrNull() ?: 0.9
                     step.conditionTimeout = etTimeout.text.toString().toLongOrNull() ?: 2000
-
-                    val trueJump = etTrueJump.text.toString().toIntOrNull() ?: 0
-                    step.ifTrueJump = if (trueJump <= 0) -1 else (trueJump - 1).coerceIn(0, totalSteps)
-
-                    val falseJump = etFalseJump.text.toString().toIntOrNull() ?: 0
-                    step.ifFalseJump = if (falseJump <= 0) -1 else (falseJump - 1).coerceIn(0, totalSteps)
+                    step.ifSteps = ifStepsCopy
 
                     if (existingStep == null) {
                         script.steps.add(step)
                     }
                     editorView?.refreshStepList()
-                    toast("已添加条件判断步骤")
+                    toast("已保存条件判断步骤")
                 } catch (e: Exception) {
                     Log.e(TAG, "保存条件判断失败", e)
                     toast("保存失败: ${e.message}")
@@ -1258,6 +1248,191 @@ class FloatingWindowService : Service() {
                 window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
             }
             .show()
+    }
+
+    /**
+     * 显示 IF 块内子步骤管理对话框
+     */
+    private fun showIfBlockStepsDialog(ifSteps: MutableList<ScriptStep>, onChanged: () -> Unit) {
+        val stepTypesForBlock = arrayOf(
+            StepType.CLICK, StepType.LONG_PRESS, StepType.SWIPE,
+            StepType.DELAY, StepType.FIND_IMAGE, StepType.FIND_TEXT
+        )
+        val typeNames = stepTypesForBlock.map { it.displayName }.toTypedArray()
+
+        // 构建步骤列表显示
+        fun buildStepsText(): String {
+            if (ifSteps.isEmpty()) return "（暂无步骤，点击下方添加）"
+            return ifSteps.mapIndexed { i, step ->
+                "${i + 1}. ${step.getDescription()}"
+            }.joinToString("\n")
+        }
+
+        val tvSteps = android.widget.TextView(this).apply {
+            text = buildStepsText()
+            setPadding(24, 16, 24, 16)
+            textSize = 13f
+            setTextColor(android.graphics.Color.BLACK)
+        }
+        val scrollView = android.widget.ScrollView(this).apply {
+            addView(tvSteps)
+        }
+
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setTitle("条件块内步骤（${ifSteps.size}个）")
+            .setView(scrollView)
+            .setPositiveButton("完成", null)
+            .setNeutralButton("添加步骤") { _, _ ->
+                // 弹出步骤类型选择
+                android.app.AlertDialog.Builder(this@FloatingWindowService)
+                    .setTitle("选择步骤类型")
+                    .setItems(typeNames) { _, which ->
+                        val type = stepTypesForBlock[which]
+                        // 复用 handleAddStep 逻辑，但把步骤加到 ifSteps 里
+                        when (type) {
+                            StepType.CLICK, StepType.LONG_PRESS,
+                            StepType.TOUCH_DOWN, StepType.TOUCH_UP -> {
+                                startCoordinatePickForIfBlock(type, ifSteps) {
+                                    tvSteps.text = buildStepsText()
+                                    onChanged()
+                                }
+                            }
+                            StepType.SWIPE -> {
+                                startSwipePickForIfBlock(type, ifSteps) {
+                                    tvSteps.text = buildStepsText()
+                                    onChanged()
+                                }
+                            }
+                            StepType.DELAY -> {
+                                ifSteps.add(ScriptStep(type = StepType.DELAY, delay = 500))
+                                tvSteps.text = buildStepsText()
+                                onChanged()
+                                toast("已添加延迟步骤")
+                            }
+                            StepType.FIND_IMAGE, StepType.FIND_TEXT -> {
+                                ifSteps.add(
+                                    ScriptStep(
+                                        type = type,
+                                        imagePath = if (type == StepType.FIND_IMAGE) "" else "",
+                                        text = if (type == StepType.FIND_TEXT) "" else "",
+                                        similarity = 0.9,
+                                        findTimeout = 2000
+                                    )
+                                )
+                                tvSteps.text = buildStepsText()
+                                onChanged()
+                                toast("已添加${type.displayName}步骤")
+                            }
+                            else -> {
+                                ifSteps.add(ScriptStep(type = type))
+                                tvSteps.text = buildStepsText()
+                                onChanged()
+                            }
+                        }
+                    }
+                    .create()
+                    .apply {
+                        window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                    }
+                    .show()
+            }
+            .setNegativeButton("清空全部") { _, _ ->
+                ifSteps.clear()
+                tvSteps.text = buildStepsText()
+                onChanged()
+                toast("已清空块内步骤")
+            }
+            .create()
+            .apply {
+                window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+            }
+        dialog.show()
+    }
+
+    /**
+     * 为 IF 块选取坐标并添加步骤
+     */
+    private fun startCoordinatePickForIfBlock(
+        type: StepType,
+        ifSteps: MutableList<ScriptStep>,
+        onDone: () -> Unit
+    ) {
+        // 隐藏悬浮球和编辑器
+        floatingBall?.visibility = View.GONE
+        closeEditor()
+
+        val overlay = android.view.View(this).apply {
+            setBackgroundColor(0x66000000.toInt())
+            isClickable = true
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        try {
+            windowManager.addView(overlay, params)
+            pickerOverlay = overlay
+        } catch (e: Exception) {
+            Log.e(TAG, "startCoordinatePickForIfBlock: addView failed", e)
+            floatingBall?.visibility = View.VISIBLE
+            openEditor()
+            toast("无法创建选取层: ${e.message}")
+            return
+        }
+        showPickerToast("点击屏幕选取${type.displayName}坐标")
+
+        overlay.setOnTouchListener { _, event ->
+            if (event.action == android.view.MotionEvent.ACTION_DOWN) {
+                val x = event.rawX.toInt()
+                val y = event.rawY.toInt()
+                ifSteps.add(ScriptStep(type = type, x = x, y = y))
+                // 清理
+                try { windowManager.removeView(overlay) } catch (_: Exception) {}
+                pickerOverlay = null
+                hidePickerToast()
+                floatingBall?.visibility = View.VISIBLE
+                onDone()
+                openEditor()
+                toast("已添加${type.displayName}步骤 ($x, $y)")
+                true
+            } else false
+        }
+    }
+
+    /**
+     * 为 IF 块选取滑动坐标并添加步骤
+     */
+    private fun startSwipePickForIfBlock(
+        type: StepType,
+        ifSteps: MutableList<ScriptStep>,
+        onDone: () -> Unit
+    ) {
+        floatingBall?.visibility = View.GONE
+        closeEditor()
+        showSwipePickerOverlay(
+            onComplete = { x1, y1, x2, y2 ->
+                ifSteps.add(
+                    ScriptStep(
+                        type = type,
+                        x1 = x1, y1 = y1, x2 = x2, y2 = y2,
+                        duration = 300
+                    )
+                )
+                floatingBall?.visibility = View.VISIBLE
+                onDone()
+                openEditor()
+                toast("已添加滑动步骤")
+            },
+            onCancel = {
+                floatingBall?.visibility = View.VISIBLE
+                openEditor()
+            }
+        )
     }
 
     private fun showRecordingOverlay() {
@@ -1763,6 +1938,70 @@ class FloatingWindowService : Service() {
                 pickerToastView = null
             }
         }, 3000)
+    }
+
+    private fun hidePickerToast() {
+        pickerToastView?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+            pickerToastView = null
+        }
+    }
+
+    /**
+     * 通用滑动坐标选取覆盖层：依次选起点和终点，完成后回调
+     */
+    private fun showSwipePickerOverlay(
+        onComplete: (Int, Int, Int, Int) -> Unit,
+        onCancel: () -> Unit = {}
+    ) {
+        var swipeState = 0 // 0=选起点, 1=选终点
+        var startX = 0
+        var startY = 0
+
+        val overlay = View(this).apply {
+            setBackgroundColor(0x33000000)
+            setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_MOVE -> {
+                        val msg = if (swipeState == 0) "选起点" else "选终点"
+                        showPickerToast("$msg: X: ${event.rawX.toInt()}, Y: ${event.rawY.toInt()}（松开确认）")
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val x = event.rawX.toInt()
+                        val y = event.rawY.toInt()
+                        if (swipeState == 0) {
+                            startX = x
+                            startY = y
+                            swipeState = 1
+                            showPickerToast("已选起点，请选取终点")
+                        } else {
+                            removePickerOverlay()
+                            hidePickerToast()
+                            onComplete(startX, startY, x, y)
+                        }
+                    }
+                }
+                true
+            }
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        try {
+            windowManager.addView(overlay, params)
+            pickerOverlay = overlay
+        } catch (e: Exception) {
+            Log.e(TAG, "showSwipePickerOverlay: addView failed", e)
+            onCancel()
+            return
+        }
+        showPickerToast("请选取滑动起点")
     }
 
     private fun takeScreenshot() {

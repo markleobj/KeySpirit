@@ -136,6 +136,15 @@ class ScriptEditActivity : AppCompatActivity() {
 
     private fun showEditStepDialog(position: Int) {
         val step = script?.steps?.getOrNull(position) ?: return
+        showEditStepDialog(step) {
+            refreshStepList()
+        }
+    }
+
+    /**
+     * 编辑单个步骤的对话框（重载，支持任意 ScriptStep 对象，用于 IF 块内子步骤）
+     */
+    private fun showEditStepDialog(step: ScriptStep, onSaved: () -> Unit = {}) {
         currentEditingStep = step
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -225,8 +234,31 @@ class ScriptEditActivity : AppCompatActivity() {
 
                 // 共用字段
                 inputs["conditionTimeout"] = addInput(layout, "超时时间(ms)", step.conditionTimeout.toString())
-                inputs["ifTrueJump"] = addInput(layout, "成立时跳转到步骤(填0=继续)", if (step.ifTrueJump < 0) "0" else (step.ifTrueJump + 1).toString())
-                inputs["ifFalseJump"] = addInput(layout, "不成立时跳转到步骤(填0=继续)", if (step.ifFalseJump < 0) "0" else (step.ifFalseJump + 1).toString())
+
+                // 块内步骤管理
+                val tvBlockTitle = TextView(this).apply {
+                    text = "条件成立时执行的步骤"
+                    setTextColor(getColor(R.color.gray))
+                    textSize = 13f
+                    setPadding(0, 16, 0, 4)
+                }
+                layout.addView(tvBlockTitle)
+                val btnManageBlock = android.widget.Button(this).apply {
+                    text = "管理块内步骤（${step.ifSteps.size}个）"
+                    setOnClickListener {
+                        showIfBlockEditor(step) {
+                            text = "管理块内步骤（${step.ifSteps.size}个）"
+                        }
+                    }
+                }
+                layout.addView(btnManageBlock)
+                val tvBlockHint = TextView(this).apply {
+                    text = "条件成立时，按顺序执行块内的所有步骤；不成立则全部跳过"
+                    setTextColor(getColor(R.color.gray))
+                    textSize = 12f
+                    setPadding(0, 8, 0, 0)
+                }
+                layout.addView(tvBlockHint)
 
                 // 找图相关View集合（用于动态显隐）
                 val imageViews = listOf(tvImgPath, btnPickImg, tvSim)
@@ -257,7 +289,7 @@ class ScriptEditActivity : AppCompatActivity() {
             .setPositiveButton("确定") { _, _ ->
                 try {
                     applyStepParams(step, inputs)
-                    refreshStepList()
+                    onSaved()
                 } catch (e: IllegalArgumentException) {
                     Toast.makeText(this, "参数格式错误: ${e.message}", Toast.LENGTH_LONG).show()
                 } catch (e: Exception) {
@@ -322,10 +354,7 @@ class ScriptEditActivity : AppCompatActivity() {
         step.conditionSimilarity = safeDouble("conditionSimilarity", 0.9)
         step.conditionText = safeString("conditionText")
         step.conditionTimeout = safeLong("conditionTimeout", 1000)
-        val trueJump = safeInt("ifTrueJump", 0)
-        step.ifTrueJump = if (trueJump <= 0) -1 else trueJump - 1
-        val falseJump = safeInt("ifFalseJump", 0)
-        step.ifFalseJump = if (falseJump <= 0) -1 else falseJump - 1
+        // ifSteps 直接在 showIfBlockEditor 中修改 step 对象，这里不需要再处理
         step.regionLeft = safeInt("regionLeft")
         step.regionTop = safeInt("regionTop")
         step.regionRight = safeInt("regionRight")
@@ -408,6 +437,106 @@ class ScriptEditActivity : AppCompatActivity() {
         }
         parent.addView(btn)
         return btn
+    }
+
+    /**
+     * IF 块内步骤编辑器
+     */
+    private fun showIfBlockEditor(step: ScriptStep, onChanged: () -> Unit) {
+        val ifSteps = step.ifSteps
+        val dialogLayout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(16, 16, 16, 16)
+        }
+
+        val tvCount = android.widget.TextView(this).apply {
+            text = "共 ${ifSteps.size} 个步骤（点击可编辑，长按可删除）"
+            setTextColor(getColor(R.color.gray))
+            textSize = 12f
+            setPadding(8, 0, 8, 8)
+        }
+        dialogLayout.addView(tvCount)
+
+        val listView = android.widget.ListView(this)
+        val adapter = object : android.widget.ArrayAdapter<String>(
+            this,
+            android.R.layout.simple_list_item_1,
+            ifSteps.mapIndexed { i, s -> "${i + 1}. ${s.getDescription()}" }
+        ) {}
+        listView.adapter = adapter
+        dialogLayout.addView(listView, android.widget.LinearLayout.LayoutParams(
+            android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+            600
+        ))
+
+        // 点击编辑
+        listView.onItemClickListener = android.widget.AdapterView.OnItemClickListener { _, _, position, _ ->
+            val subStep = ifSteps[position]
+            showEditStepDialog(subStep) {
+                adapter.clear()
+                adapter.addAll(ifSteps.mapIndexed { i, s -> "${i + 1}. ${s.getDescription()}" })
+                tvCount.text = "共 ${ifSteps.size} 个步骤（点击可编辑，长按可删除）"
+                onChanged()
+            }
+        }
+
+        // 长按删除
+        listView.onItemLongClickListener = android.widget.AdapterView.OnItemLongClickListener { _, _, position, _ ->
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("删除步骤")
+                .setMessage("确定删除第 ${position + 1} 步吗？")
+                .setPositiveButton("删除") { _, _ ->
+                    ifSteps.removeAt(position)
+                    adapter.clear()
+                    adapter.addAll(ifSteps.mapIndexed { i, s -> "${i + 1}. ${s.getDescription()}" })
+                    tvCount.text = "共 ${ifSteps.size} 个步骤（点击可编辑，长按可删除）"
+                    onChanged()
+                    Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("取消", null)
+                .show()
+            true
+        }
+
+        // 添加步骤按钮
+        val btnAdd = android.widget.Button(this).apply {
+            text = "+ 添加步骤"
+            setOnClickListener {
+                val types = arrayOf(
+                    "点击", "长按", "滑动", "延迟", "找图点击", "找文字点击"
+                )
+                val typeMap = arrayOf(
+                    StepType.CLICK, StepType.LONG_PRESS, StepType.SWIPE,
+                    StepType.DELAY, StepType.FIND_IMAGE, StepType.FIND_TEXT
+                )
+                androidx.appcompat.app.AlertDialog.Builder(this@ScriptEditActivity)
+                    .setTitle("选择步骤类型")
+                    .setItems(types) { _, which ->
+                        val type = typeMap[which]
+                        val newStep = ScriptStep(type = type)
+                        ifSteps.add(newStep)
+                        adapter.clear()
+                        adapter.addAll(ifSteps.mapIndexed { i, s -> "${i + 1}. ${s.getDescription()}" })
+                        tvCount.text = "共 ${ifSteps.size} 个步骤（点击可编辑，长按可删除）"
+                        onChanged()
+                        // 自动弹出编辑
+                        showEditStepDialog(newStep) {
+                            adapter.clear()
+                            adapter.addAll(ifSteps.mapIndexed { i, s -> "${i + 1}. ${s.getDescription()}" })
+                            onChanged()
+                        }
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+        }
+        dialogLayout.addView(btnAdd)
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("条件块内步骤")
+            .setView(dialogLayout)
+            .setPositiveButton("完成", null)
+            .show()
     }
 
     /**

@@ -28,6 +28,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var switchAccessibility: Switch
     private lateinit var switchFloating: Switch
     private lateinit var switchScreenCapture: Switch
+    private lateinit var switchStorage: Switch
     private lateinit var switchRandomDelay: Switch
     private lateinit var switchOffset: Switch
 
@@ -56,6 +57,7 @@ class SettingsActivity : AppCompatActivity() {
         switchAccessibility = findViewById(R.id.switchAccessibility)
         switchFloating = findViewById(R.id.switchFloating)
         switchScreenCapture = findViewById(R.id.switchScreenCapture)
+        switchStorage = findViewById(R.id.switchStorage)
         switchRandomDelay = findViewById(R.id.switchRandomDelay)
         switchOffset = findViewById(R.id.switchOffset)
 
@@ -85,6 +87,9 @@ class SettingsActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.itemScreenCapture).setOnClickListener {
             requestScreenCapture()
+        }
+        findViewById<View>(R.id.itemStorage).setOnClickListener {
+            requestStoragePermission()
         }
     }
 
@@ -155,6 +160,29 @@ class SettingsActivity : AppCompatActivity() {
         switchFloating.isChecked = canDrawOverlays()
         // 使用 isRunning 检查（状态为 RUNNING 才认为已开启）
         switchScreenCapture.isChecked = ScreenCaptureService.isRunning()
+        switchStorage.isChecked = hasStoragePermission()
+    }
+
+    private fun hasStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            checkSelfPermission(android.Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    private fun requestStoragePermission() {
+        if (hasStoragePermission()) {
+            Toast.makeText(this, "存储权限已开启", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requestPermissions(arrayOf(android.Manifest.permission.READ_MEDIA_IMAGES), 1002)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            requestPermissions(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE), 1002)
+        }
     }
 
     private fun canDrawOverlays(): Boolean {
@@ -203,6 +231,15 @@ class SettingsActivity : AppCompatActivity() {
             startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_SCREEN_CAPTURE)
         } catch (e: Exception) {
             Toast.makeText(this, "无法请求截屏权限: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1002) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED
+            switchStorage.isChecked = granted
+            Toast.makeText(this, if (granted) "存储权限已开启" else "存储权限被拒绝", Toast.LENGTH_SHORT).show()
         }
     }
 

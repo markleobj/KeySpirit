@@ -147,12 +147,7 @@ class ScriptExecutor(
                 sleep(randomMs)
             }
 
-            // 处理条件跳转（IF 步骤）
-            if (step.type == StepType.IF && result.jumpTo >= 0) {
-                i = result.jumpTo
-            } else {
-                i++
-            }
+            i++
         }
     }
 
@@ -254,8 +249,8 @@ class ScriptExecutor(
                 StepResult(true)
             }
             StepType.IF -> {
-                val jumpTo = executeIfCondition(step, allSteps, currentIndex)
-                StepResult(true, jumpTo)
+                executeIfBlock(step, service)
+                StepResult(true)
             }
         }
     }
@@ -360,14 +355,9 @@ class ScriptExecutor(
     }
 
     /**
-     * 执行条件判断，返回要跳转到的步骤索引
-     * -1 表示继续下一步
+     * 执行 IF 条件块：条件成立则执行 ifSteps 内的所有子步骤，不成立则跳过
      */
-    private fun executeIfCondition(
-        step: ScriptStep,
-        allSteps: List<ScriptStep>,
-        currentIndex: Int
-    ): Int {
+    private fun executeIfBlock(step: ScriptStep, service: AutoAccessibilityService) {
         val conditionMet = when (step.conditionType) {
             0 -> checkFindImage(step, true)    // 找图成功
             1 -> checkFindText(step, true)     // 找文字成功
@@ -376,10 +366,11 @@ class ScriptExecutor(
             else -> false
         }
 
-        return if (conditionMet) {
-            if (step.ifTrueJump >= 0 && step.ifTrueJump < allSteps.size) step.ifTrueJump else -1
+        if (conditionMet && step.ifSteps.isNotEmpty()) {
+            Log.d(TAG, "IF 条件成立，执行 ${step.ifSteps.size} 个子步骤")
+            executeSteps(step.ifSteps, service)
         } else {
-            if (step.ifFalseJump >= 0 && step.ifFalseJump < allSteps.size) step.ifFalseJump else -1
+            Log.d(TAG, "IF 条件不成立，跳过 ${step.ifSteps.size} 个子步骤")
         }
     }
 

@@ -44,8 +44,10 @@ data class ScriptStep(
     var conditionRegionTop: Int = 0,
     var conditionRegionRight: Int = 0,
     var conditionRegionBottom: Int = 0,
-    var ifTrueJump: Int = -1,   // 条件成立时跳转到的步骤序号（-1=继续下一步）
-    var ifFalseJump: Int = -1,  // 条件不成立时跳转到的步骤序号（-1=继续下一步）
+    var ifTrueJump: Int = -1,   // 已废弃：旧版本跳转逻辑，保留用于兼容
+    var ifFalseJump: Int = -1,  // 已废弃：旧版本跳转逻辑，保留用于兼容
+    // IF 条件块：条件成立时执行的子步骤列表
+    var ifSteps: MutableList<ScriptStep> = mutableListOf(),
     // 备注
     var remark: String = ""
 ) {
@@ -77,9 +79,7 @@ data class ScriptStep(
                     3 -> "找不到文字: \"$conditionText\""
                     else -> "未知条件"
                 }
-                val trueStr = if (ifTrueJump >= 0) "成立→跳步骤${ifTrueJump + 1}" else "成立→继续"
-                val falseStr = if (ifFalseJump >= 0) "不成立→跳步骤${ifFalseJump + 1}" else "不成立→继续"
-                "如果 $condStr\n$trueStr, $falseStr"
+                "如果 $condStr → 执行 ${ifSteps.size} 个步骤"
             }
         }
     }
