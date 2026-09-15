@@ -52,6 +52,8 @@ class FloatingWindowService : Service() {
     private var floatingPanel: FloatingPanelView? = null
     private var recordingOverlay: View? = null
     private var pickerOverlay: View? = null  // 坐标/区域选取的全屏悬浮层
+    private var mouseIndicator: View? = null  // 鼠标位置指示器
+    private var showMouseIndicator = true     // 是否显示鼠标指示器
 
     private var isPanelVisible = false
     private var isRecording = false
@@ -236,14 +238,20 @@ class FloatingWindowService : Service() {
         hideRecordingOverlay()
         hidePanel()
 
-        // 保存为新脚本
         if (steps.isNotEmpty()) {
+            // 创建新脚本并打开编辑器让用户编辑
             val script = Script(
-                name = "录制脚本_${System.currentTimeMillis() % 100000}",
+                name = "录制脚本",
                 steps = steps.toMutableList()
             )
-            scriptManager.saveScript(script)
-            toast("录制完成，已保存 ${steps.size} 步")
+            editingScript = script
+            com.keyspirit.util.CurrentProjectHolder.currentScriptId = script.id
+            com.keyspirit.util.CurrentProjectHolder.currentScriptName = script.name
+            toast("录制完成，共 ${steps.size} 步，正在打开编辑器...")
+            // 延迟一下让录制浮层完全消失
+            handler.postDelayed({
+                openEditor()
+            }, 300)
         } else {
             toast("录制结束，未捕获到操作")
         }
@@ -277,7 +285,25 @@ class FloatingWindowService : Service() {
         if (s.steps == null) {
             s.steps = mutableListOf()
         }
+        // 递归确保所有 ifSteps 不为 null
+        ensureIfStepsNotNull(s.steps)
         return s
+    }
+
+    /**
+     * 递归确保所有步骤的 ifSteps 不为 null
+     */
+    private fun ensureIfStepsNotNull(steps: MutableList<ScriptStep>?) {
+        if (steps == null) return
+        for (step in steps) {
+            @Suppress("SENSELESS_COMPARISON")
+            if (step.ifSteps == null) {
+                step.ifSteps = mutableListOf()
+            }
+            if (step.type == StepType.IF && step.ifSteps.isNotEmpty()) {
+                ensureIfStepsNotNull(step.ifSteps)
+            }
+        }
     }
 
     private fun openEditor() {
@@ -303,7 +329,8 @@ class FloatingWindowService : Service() {
                     when (step.type) {
                         StepType.CLICK, StepType.LONG_PRESS,
                         StepType.TOUCH_DOWN, StepType.TOUCH_UP,
-                        StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP -> startCoordinatePickForStep(step)
+                        StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP,
+                        StepType.MOVE_MOUSE, StepType.PICK_POINT -> startCoordinatePickForStep(step)
                         StepType.FIND_IMAGE -> startRegionPickForFindImage(step)
                         StepType.FIND_TEXT -> startRegionPickForFindText(step)
                         StepType.SCREENSHOT -> startRegionPickForScreenshot(step)
@@ -319,23 +346,28 @@ class FloatingWindowService : Service() {
                     val index = path.last()
                     if (parentList != null && index in parentList.indices) {
                         parentList.removeAt(index)
+                        // 删除后检查并修正插入路径
+                        fixInsertPathAfterDelete(path)
                         editorView?.refreshStepList()
+                    } else {
+                        toast("删除失败：步骤路径无效")
                     }
                 }
                 override fun onSave() {
-                    ensureEditingScript().let {
-                        it.name = it.name.ifEmpty { "未命名脚本" }
-                        scriptManager.saveScript(it)
-                        com.keyspirit.util.CurrentProjectHolder.currentScriptId = it.id
-                        com.keyspirit.util.CurrentProjectHolder.currentScriptName = it.name
-                        toast("已保存")
-                    }
+                    val script = ensureEditingScript()
+                    showSaveNameDialog(script)
                 }
                 override fun onRun() {
-                    ensureEditingScript().let {
-                        it.name = it.name.ifEmpty { "未命名脚本" }
-                        scriptManager.saveScript(it)
-                        startExecution(it)
+                    val script = ensureEditingScript()
+                    // 如果脚本没有名字或默认名字，先让用户命名
+                    if (script.name.isEmpty() || script.name == "新脚本" || script.name == "录制脚本") {
+                        showSaveNameDialog(script, onSaved = {
+                            startExecution(script)
+                            closeEditor()
+                        })
+                    } else {
+                        scriptManager.saveScript(script)
+                        startExecution(script)
                         closeEditor()
                     }
                 }
@@ -424,11 +456,44 @@ class FloatingWindowService : Service() {
             toast("没有可保存的脚本")
             return
         }
-        script.name = script.name.ifEmpty { "未命名脚本" }
-        scriptManager.saveScript(script)
-        com.keyspirit.util.CurrentProjectHolder.currentScriptId = script.id
-        com.keyspirit.util.CurrentProjectHolder.currentScriptName = script.name
-        toast("已保存: ${script.name}")
+        // 弹出命名对话框让用户输入项目名称
+        showSaveNameDialog(script)
+    }
+
+    /**
+     * 保存命名对话框
+     */
+    private fun showSaveNameDialog(script: Script, onSaved: (() -> Unit)? = null) {
+        val input = android.widget.EditText(this).apply {
+            hint = "请输入项目名称"
+            setText(if (script.name.isNotEmpty() && script.name != "新脚本" && script.name != "录制脚本") script.name else "")
+            setSingleLine()
+            setPadding(32, 24, 32, 24)
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("保存项目")
+            .setMessage("请给这个项目起个名字")
+            .setView(input)
+            .setPositiveButton("保存") { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isEmpty()) {
+                    toast("请输入项目名称")
+                    return@setPositiveButton
+                }
+                script.name = name
+                scriptManager.saveScript(script)
+                com.keyspirit.util.CurrentProjectHolder.currentScriptId = script.id
+                com.keyspirit.util.CurrentProjectHolder.currentScriptName = script.name
+                editorView?.setScript(script)
+                toast("已保存: $name")
+                onSaved?.invoke()
+            }
+            .setNegativeButton("取消", null)
+            .create()
+            .apply {
+                window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+            }
+            .show()
     }
 
     /**
@@ -442,7 +507,8 @@ class FloatingWindowService : Service() {
         when (type) {
             StepType.CLICK, StepType.LONG_PRESS,
             StepType.TOUCH_DOWN, StepType.TOUCH_UP,
-            StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP -> startCoordinatePickForStep(null)
+            StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP,
+            StepType.MOVE_MOUSE, StepType.PICK_POINT -> startCoordinatePickForStep(null)
             StepType.FIND_IMAGE -> startRegionPickForFindImage(null)
             StepType.FIND_TEXT -> startRegionPickForFindText(null)
             StepType.SCREENSHOT -> startRegionPickForScreenshot(null)
@@ -475,12 +541,14 @@ class FloatingWindowService : Service() {
             val idx = path[i]
             if (idx !in currentList.indices) {
                 Log.e(TAG, "addStepToPath: 路径无效 $path，索引 $idx 越界")
+                toast("添加失败：插入位置无效，已改加到末尾")
                 script.steps.add(step) // 兜底
                 return
             }
             val parentStep = currentList[idx]
             if (parentStep.type != StepType.IF) {
                 Log.e(TAG, "addStepToPath: 路径无效 $path，第 $i 层不是 IF 类型")
+                toast("添加失败：插入位置不是条件块，已改加到末尾")
                 script.steps.add(step) // 兜底
                 return
             }
@@ -491,6 +559,55 @@ class FloatingWindowService : Service() {
             }
             // 继续深入
             currentList = parentStep.ifSteps
+        }
+    }
+
+    /**
+     * 删除步骤后修正插入路径
+     * 如果插入路径指向被删除的步骤或其后面的步骤，需要调整
+     */
+    private fun fixInsertPathAfterDelete(deletedPath: List<Int>) {
+        val insertPath = editorView?.insertPath ?: return
+        if (insertPath.isEmpty()) return
+
+        // 检查删除的路径是否是插入路径的前缀（即删除了插入位置所在的 IF 块）
+        var isPrefix = true
+        for (i in deletedPath.indices) {
+            if (i >= insertPath.size || insertPath[i] != deletedPath[i]) {
+                isPrefix = false
+                break
+            }
+        }
+        if (isPrefix && insertPath.size >= deletedPath.size) {
+            // 删除了插入位置的父级或更上层，重置到根级别
+            editorView?.resetInsertPosition()
+            toast("插入位置已重置：所在的条件块被删除了")
+            return
+        }
+
+        // 如果删除的是同一层且在插入位置之前或同一位置，调整索引
+        if (insertPath.size == deletedPath.size) {
+            var sameParent = true
+            for (i in 0 until insertPath.size - 1) {
+                if (insertPath[i] != deletedPath[i]) {
+                    sameParent = false
+                    break
+                }
+            }
+            if (sameParent) {
+                val deletedIdx = deletedPath.last()
+                val insertIdx = insertPath.last()
+                if (deletedIdx < insertIdx) {
+                    // 删除的在插入位置前面，插入位置前移
+                    val newPath = insertPath.toMutableList()
+                    newPath[newPath.size - 1] = insertIdx - 1
+                    editorView?.insertPath = newPath
+                } else if (deletedIdx == insertIdx) {
+                    // 删除的就是插入位置，重置到根级别
+                    editorView?.resetInsertPosition()
+                    toast("插入位置已重置：目标位置被删除了")
+                }
+            }
         }
     }
 
@@ -1891,8 +2008,25 @@ class FloatingWindowService : Service() {
         scriptExecutor = ScriptExecutor(script, object : ScriptExecutor.ExecutionListener {
             override fun onStepStart(index: Int, step: com.keyspirit.script.ScriptStep) {
                 updatePanelInfo("步骤 ${index + 1}/${script.stepCount()}")
+                // 更新鼠标指示器位置
+                when (step.type) {
+                    StepType.CLICK, StepType.TOUCH_DOWN, StepType.TOUCH_UP,
+                    StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP,
+                    StepType.LONG_PRESS, StepType.MOVE_MOUSE, StepType.PICK_POINT -> {
+                        updateMouseIndicator(step.x, step.y)
+                    }
+                    StepType.SWIPE -> {
+                        updateMouseIndicator(step.x1, step.y1)
+                    }
+                    else -> {}
+                }
             }
-            override fun onStepComplete(index: Int, step: com.keyspirit.script.ScriptStep) {}
+            override fun onStepComplete(index: Int, step: com.keyspirit.script.ScriptStep) {
+                // 滑动完成后更新到终点位置
+                if (step.type == StepType.SWIPE) {
+                    updateMouseIndicator(step.x2, step.y2)
+                }
+            }
             override fun onLoopUpdate(currentLoop: Int, totalLoops: Int) {
                 val total = if (totalLoops <= 0) "∞" else totalLoops.toString()
                 updatePanelInfo("循环: $currentLoop/$total")
@@ -1900,6 +2034,7 @@ class FloatingWindowService : Service() {
             override fun onComplete() {
                 isExecuting = false
                 scriptExecutor = null
+                hideMouseIndicator()
                 hidePanel()
                 floatingBall?.state = FloatingBallView.BallState.IDLE
                 toast("脚本执行完成")
@@ -1908,9 +2043,15 @@ class FloatingWindowService : Service() {
             override fun onError(message: String) {
                 isExecuting = false
                 scriptExecutor = null
+                hideMouseIndicator()
                 hidePanel()
                 floatingBall?.state = FloatingBallView.BallState.IDLE
-                toast("执行出错: $message")
+                // 用对话框显示错误，让用户能清楚看到
+                showAlertDialog(
+                    title = "执行出错",
+                    message = message,
+                    positive = "知道了"
+                )
             }
         })
         // 应用防检测设置
@@ -1921,6 +2062,7 @@ class FloatingWindowService : Service() {
         )
         floatingBall?.state = FloatingBallView.BallState.EXECUTING
         showPanel()
+        showMouseIndicator() // 显示鼠标指示器
         scriptExecutor?.start()
     }
 
@@ -1946,6 +2088,7 @@ class FloatingWindowService : Service() {
         scriptExecutor?.stop()
         isExecuting = false
         scriptExecutor = null
+        hideMouseIndicator()
         hidePanel()
         floatingBall?.state = FloatingBallView.BallState.IDLE
         toast("已停止执行")
@@ -2342,8 +2485,7 @@ class FloatingWindowService : Service() {
 
     private fun takeScreenshot() {
         // 先检查截屏服务，不要急着隐藏面板
-        val service = com.keyspirit.service.ScreenCaptureService.instance
-        if (service == null) {
+        if (!com.keyspirit.service.ScreenCaptureService.isRunning()) {
             val error = com.keyspirit.service.ScreenCaptureService.getError()
             val state = com.keyspirit.service.ScreenCaptureService.getState()
             val message = buildString {
@@ -2369,6 +2511,7 @@ class FloatingWindowService : Service() {
                 .show()
             return
         }
+        val service = com.keyspirit.service.ScreenCaptureService.instance ?: return
         // 截屏服务正常，隐藏面板和悬浮球后截图
         val wasPanelVisible = isPanelVisible
         hidePanel()
@@ -2383,13 +2526,12 @@ class FloatingWindowService : Service() {
         Thread {
             try {
                 // 等待屏幕刷新（悬浮元素移除后）
-                Thread.sleep(400)
+                Thread.sleep(500)
 
                 val bitmap = service.captureScreen()
-                // 截图完成后恢复悬浮球
+                // 截图完成后恢复悬浮球和面板
                 handler.post {
                     floatingBall?.visibility = View.VISIBLE
-                    // 如果之前面板是打开的，截图完成后重新显示面板
                     if (wasPanelVisible) {
                         showPanel()
                     }
@@ -2400,7 +2542,7 @@ class FloatingWindowService : Service() {
                     }
                     return@Thread
                 }
-                // 如果没有当前项目，自动创建一个默认项目
+                // 如果没有当前项目，让用户命名保存
                 var scriptId = com.keyspirit.util.CurrentProjectHolder.currentScriptId
                 var scriptName = com.keyspirit.util.CurrentProjectHolder.currentScriptName
                 if (scriptId == null) {
@@ -2430,6 +2572,61 @@ class FloatingWindowService : Service() {
                 }
             }
         }.start()
+    }
+
+    // ============ 鼠标指示器 ============
+
+    /**
+     * 显示鼠标位置指示器
+     */
+    private fun showMouseIndicator() {
+        if (!showMouseIndicator) return
+        if (mouseIndicator != null) return
+        mouseIndicator = View(this).apply {
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(android.graphics.Color.parseColor("#E74C3C"))
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setStroke(3, android.graphics.Color.parseColor("#FFFFFF"))
+            }
+            elevation = 10f
+        }
+        val size = 24
+        val params = createOverlayParams(size, size).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        try {
+            windowManager.addView(mouseIndicator, params)
+        } catch (e: Exception) {
+            Log.e(TAG, "showMouseIndicator: addView failed", e)
+            mouseIndicator = null
+        }
+    }
+
+    /**
+     * 隐藏鼠标位置指示器
+     */
+    private fun hideMouseIndicator() {
+        mouseIndicator?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+        }
+        mouseIndicator = null
+    }
+
+    /**
+     * 更新鼠标指示器位置
+     */
+    private fun updateMouseIndicator(x: Int, y: Int) {
+        val indicator = mouseIndicator ?: return
+        val params = indicator.layoutParams as? WindowManager.LayoutParams ?: return
+        // 居中显示：指示器中心对齐坐标点
+        params.x = x - 12
+        params.y = y - 12
+        try {
+            windowManager.updateViewLayout(indicator, params)
+        } catch (_: Exception) {}
     }
 
     // ============ 工具方法 ============

@@ -83,12 +83,30 @@ class ScriptManager(private val context: Context) {
     }
 
     /**
-     * 确保 script.steps 不为 null（Gson 反序列化可能绕过构造函数）
+     * 确保 script.steps 以及所有 IF 块的 ifSteps 不为 null（Gson 反序列化可能绕过构造函数）
      */
     private fun ensureStepsNotNull(script: Script) {
         @Suppress("SENSELESS_COMPARISON")
         if (script.steps == null) {
             script.steps = mutableListOf()
+        }
+        // 递归检查所有步骤的 ifSteps
+        ensureIfStepsNotNull(script.steps)
+    }
+
+    /**
+     * 递归确保所有步骤的 ifSteps 不为 null
+     */
+    private fun ensureIfStepsNotNull(steps: MutableList<ScriptStep>?) {
+        if (steps == null) return
+        for (step in steps) {
+            @Suppress("SENSELESS_COMPARISON")
+            if (step.ifSteps == null) {
+                step.ifSteps = mutableListOf()
+            }
+            if (step.type == StepType.IF && step.ifSteps.isNotEmpty()) {
+                ensureIfStepsNotNull(step.ifSteps)
+            }
         }
     }
 

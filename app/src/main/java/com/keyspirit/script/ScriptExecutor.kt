@@ -216,6 +216,17 @@ class ScriptExecutor(
                 performClick(service, ox, oy)
                 StepResult(true)
             }
+            StepType.MOVE_MOUSE -> {
+                val (ox, oy) = applyOffset(step.x, step.y)
+                performMoveTo(service, ox, oy)
+                StepResult(true)
+            }
+            StepType.PICK_POINT -> {
+                // 取鼠标点步骤：移动鼠标到指定位置（作为标记点使用）
+                val (ox, oy) = applyOffset(step.x, step.y)
+                performMoveTo(service, ox, oy)
+                StepResult(true)
+            }
             StepType.SWIPE -> {
                 val (ox1, oy1) = applyOffset(step.x1, step.y1)
                 val (ox2, oy2) = applyOffset(step.x2, step.y2)
@@ -230,26 +241,45 @@ class ScriptExecutor(
             StepType.SCREENSHOT -> {
                 // 执行截图（截取指定区域或全屏）
                 val captureService = com.keyspirit.service.ScreenCaptureService.instance
-                if (captureService != null) {
+                if (captureService == null) {
+                    handler.post { listener.onError("步骤${currentIndex + 1}(截图)失败：截屏服务未启动") }
+                    StepResult(false)
+                } else {
                     val bitmap = captureService.captureScreen()
-                    if (bitmap != null && script.id.isNotBlank()) {
-                        val cropped = if (step.useRegion) {
-                            val cropLeft = step.regionLeft.coerceIn(0, bitmap.width - 1)
-                            val cropTop = step.regionTop.coerceIn(0, bitmap.height - 1)
-                            val cropRight = step.regionRight.coerceIn(cropLeft + 1, bitmap.width)
-                            val cropBottom = step.regionBottom.coerceIn(cropTop + 1, bitmap.height)
-                            android.graphics.Bitmap.createBitmap(
-                                bitmap, cropLeft, cropTop,
-                                cropRight - cropLeft, cropBottom - cropTop
+                    if (bitmap == null) {
+                        handler.post { listener.onError("步骤${currentIndex + 1}(截图)失败：截屏返回空，${captureService.getDiagnosticInfo()}") }
+                        StepResult(false)
+                    } else if (script.id.isBlank()) {
+                        handler.post { listener.onError("步骤${currentIndex + 1}(截图)失败：脚本ID为空，请先保存脚本") }
+                        StepResult(false)
+                    } else {
+                        try {
+                            val cropped = if (step.useRegion) {
+                                val cropLeft = step.regionLeft.coerceIn(0, bitmap.width - 1)
+                                val cropTop = step.regionTop.coerceIn(0, bitmap.height - 1)
+                                val cropRight = step.regionRight.coerceIn(cropLeft + 1, bitmap.width)
+                                val cropBottom = step.regionBottom.coerceIn(cropTop + 1, bitmap.height)
+                                android.graphics.Bitmap.createBitmap(
+                                    bitmap, cropLeft, cropTop,
+                                    cropRight - cropLeft, cropBottom - cropTop
+                                )
+                            } else bitmap
+                            val name = step.imageName.ifEmpty { null }
+                            val savedPath = com.keyspirit.util.ScreenshotUtils.saveToProject(
+                                service, cropped, script.id, name
                             )
-                        } else bitmap
-                        val name = step.imageName.ifEmpty { null }
-                        com.keyspirit.util.ScreenshotUtils.saveToProject(
-                            service, cropped, script.id, name
-                        )
+                            if (savedPath == null) {
+                                handler.post { listener.onError("步骤${currentIndex + 1}(截图)失败：图片保存失败") }
+                                StepResult(false)
+                            } else {
+                                StepResult(true)
+                            }
+                        } catch (e: Exception) {
+                            handler.post { listener.onError("步骤${currentIndex + 1}(截图)异常：${e.message}") }
+                            StepResult(false)
+                        }
                     }
                 }
-                StepResult(true)
             }
             StepType.DELAY -> {
                 val delay = if (step.randomDelay > 0) {
@@ -261,11 +291,11 @@ class ScriptExecutor(
                 StepResult(true)
             }
             StepType.FIND_IMAGE -> {
-                val found = findAndClickImage(step)
+                val found = findAndClickImage(step, currentIndex)
                 StepResult(found)
             }
             StepType.FIND_TEXT -> {
-                val found = findAndClickText(step)
+                val found = findAndClickText(step, currentIndex)
                 StepResult(found)
             }
             StepType.LOOP -> {
@@ -294,6 +324,23 @@ class ScriptExecutor(
             while (!done) lock.wait(3000)
         }
         sleep(50) // 手势完成后短暂等待
+    }
+
+    private fun performMoveTo(service: AutoAccessibilityService, x: Int, y: Int) {
+        val lock = Object()
+        var done = false
+        service.moveTo(x, y, object : AutoAccessibilityService.GestureCallback {
+            override fun onCompleted() {
+                synchronized(lock) { done = true; lock.notifyAll() }
+            }
+            override fun onCancelled() {
+                synchronized(lock) { done = true; lock.notifyAll() }
+            }
+        })
+        synchronized(lock) {
+            while (!done) lock.wait(3000)
+        }
+        sleep(30) // 移动后短暂等待
     }
 
     private fun performTouchDown(service: AutoAccessibilityService, x: Int, y: Int, duration: Long) {
@@ -333,28 +380,72 @@ class ScriptExecutor(
         performTouchDown(service, x, y, duration)
     }
 
-    private fun findAndClickImage(step: ScriptStep): Boolean {
-        val matcher = ImageMatcher.instance ?: return false
+    private fun findAndClickImage(step: ScriptStep, stepIndex: Int): Boolean {
+        val matcher = ImageMatcher.instance
+        if (matcher == null) {
+            handler.post { listener.onError("步骤${stepIndex + 1}(找图)失败：图像识别模块未初始化") }
+            return false
+        }
+        if (step.imagePath.isBlank()) {
+            handler.post { listener.onError("步骤${stepIndex + 1}(找图)失败：图片路径为空，请先设置要查找的图片") }
+            return false
+        }
+        // 检查截屏服务是否运行
+        if (!com.keyspirit.service.ScreenCaptureService.isRunning()) {
+            handler.post { listener.onError("步骤${stepIndex + 1}(找图)失败：截屏服务未启动，请先在设置中开启截屏权限") }
+            return false
+        }
         val region = if (step.useRegion) {
             android.graphics.Rect(step.regionLeft, step.regionTop, step.regionRight, step.regionBottom)
         } else null
-        val result = matcher.findImage(step.imagePath, step.similarity, step.findTimeout, region)
+        val result = try {
+            matcher.findImage(step.imagePath, step.similarity, step.findTimeout, region)
+        } catch (e: Exception) {
+            handler.post { listener.onError("步骤${stepIndex + 1}(找图)异常：${e.message}\n${e.stackTrace.take(5).joinToString("\n") { it.toString() }}") }
+            return false
+        }
         if (result != null) {
-            val service = AutoAccessibilityService.instance ?: return false
+            val service = AutoAccessibilityService.instance
+            if (service == null) {
+                handler.post { listener.onError("步骤${stepIndex + 1}(找图)成功但点击失败：无障碍服务未开启") }
+                return false
+            }
             performClick(service, result.x, result.y)
             return true
         }
         return false
     }
 
-    private fun findAndClickText(step: ScriptStep): Boolean {
-        val ocr = OcrHelper.instance ?: return false
+    private fun findAndClickText(step: ScriptStep, stepIndex: Int): Boolean {
+        val ocr = OcrHelper.instance
+        if (ocr == null) {
+            handler.post { listener.onError("步骤${stepIndex + 1}(找文字)失败：OCR模块未初始化") }
+            return false
+        }
+        if (step.text.isBlank()) {
+            handler.post { listener.onError("步骤${stepIndex + 1}(找文字)失败：要查找的文字为空") }
+            return false
+        }
+        // 检查截屏服务是否运行
+        if (!com.keyspirit.service.ScreenCaptureService.isRunning()) {
+            handler.post { listener.onError("步骤${stepIndex + 1}(找文字)失败：截屏服务未启动，请先在设置中开启截屏权限") }
+            return false
+        }
         val region = if (step.useRegion) {
             android.graphics.Rect(step.regionLeft, step.regionTop, step.regionRight, step.regionBottom)
         } else null
-        val result = ocr.findText(step.text, step.findTimeout, region)
+        val result = try {
+            ocr.findText(step.text, step.findTimeout, region)
+        } catch (e: Exception) {
+            handler.post { listener.onError("步骤${stepIndex + 1}(找文字)异常：${e.message}\n${e.stackTrace.take(5).joinToString("\n") { it.toString() }}") }
+            return false
+        }
         if (result != null) {
-            val service = AutoAccessibilityService.instance ?: return false
+            val service = AutoAccessibilityService.instance
+            if (service == null) {
+                handler.post { listener.onError("步骤${stepIndex + 1}(找文字)成功但点击失败：无障碍服务未开启") }
+                return false
+            }
             performClick(service, result.x, result.y)
             return true
         }
@@ -382,6 +473,13 @@ class ScriptExecutor(
      * 执行 IF 条件块：条件成立则执行 ifSteps 内的所有子步骤，不成立则跳过
      */
     private fun executeIfBlock(step: ScriptStep, service: AutoAccessibilityService) {
+        // 安全检查：ifSteps 可能为 null（Gson 反序列化问题）
+        @Suppress("SENSELESS_COMPARISON")
+        val ifSteps = step.ifSteps ?: mutableListOf()
+        if (step.ifSteps == null) {
+            step.ifSteps = ifSteps
+        }
+
         val conditionMet = when (step.conditionType) {
             0 -> checkFindImage(step, true)    // 找图成功
             1 -> checkFindText(step, true)     // 找文字成功
@@ -390,11 +488,11 @@ class ScriptExecutor(
             else -> false
         }
 
-        if (conditionMet && step.ifSteps.isNotEmpty()) {
-            Log.d(TAG, "IF 条件成立，执行 ${step.ifSteps.size} 个子步骤")
-            executeSteps(step.ifSteps, service)
+        if (conditionMet && ifSteps.isNotEmpty()) {
+            Log.d(TAG, "IF 条件成立，执行 ${ifSteps.size} 个子步骤")
+            executeSteps(ifSteps, service)
         } else {
-            Log.d(TAG, "IF 条件不成立，跳过 ${step.ifSteps.size} 个子步骤")
+            Log.d(TAG, "IF 条件不成立，跳过 ${ifSteps.size} 个子步骤")
         }
     }
 
@@ -402,19 +500,32 @@ class ScriptExecutor(
      * 检查找图条件（不点击，只判断是否存在）
      */
     private fun checkFindImage(step: ScriptStep, expectFound: Boolean): Boolean {
-        val matcher = ImageMatcher.instance ?: return !expectFound
+        val matcher = ImageMatcher.instance
+        if (matcher == null) {
+            handler.post { listener.onError("IF条件判断失败：图像识别模块未初始化，请先开启截屏权限") }
+            return false
+        }
+        if (step.conditionImagePath.isBlank()) {
+            handler.post { listener.onError("IF条件判断失败：条件图片路径为空") }
+            return false
+        }
         val region = if (step.conditionUseRegion) {
             android.graphics.Rect(
                 step.conditionRegionLeft, step.conditionRegionTop,
                 step.conditionRegionRight, step.conditionRegionBottom
             )
         } else null
-        val result = matcher.findImage(
-            step.conditionImagePath,
-            step.conditionSimilarity,
-            step.conditionTimeout,
-            region
-        )
+        val result = try {
+            matcher.findImage(
+                step.conditionImagePath,
+                step.conditionSimilarity,
+                step.conditionTimeout,
+                region
+            )
+        } catch (e: Exception) {
+            handler.post { listener.onError("IF条件找图异常：${e.message}") }
+            return false
+        }
         val found = result != null
         return if (expectFound) found else !found
     }
@@ -423,18 +534,31 @@ class ScriptExecutor(
      * 检查找文字条件（不点击，只判断是否存在）
      */
     private fun checkFindText(step: ScriptStep, expectFound: Boolean): Boolean {
-        val ocr = OcrHelper.instance ?: return !expectFound
+        val ocr = OcrHelper.instance
+        if (ocr == null) {
+            handler.post { listener.onError("IF条件判断失败：OCR模块未初始化，请先开启截屏权限") }
+            return false
+        }
+        if (step.conditionText.isBlank()) {
+            handler.post { listener.onError("IF条件判断失败：条件文字为空") }
+            return false
+        }
         val region = if (step.conditionUseRegion) {
             android.graphics.Rect(
                 step.conditionRegionLeft, step.conditionRegionTop,
                 step.conditionRegionRight, step.conditionRegionBottom
             )
         } else null
-        val result = ocr.findText(
-            step.conditionText,
-            step.conditionTimeout,
-            region
-        )
+        val result = try {
+            ocr.findText(
+                step.conditionText,
+                step.conditionTimeout,
+                region
+            )
+        } catch (e: Exception) {
+            handler.post { listener.onError("IF条件找文字异常：${e.message}") }
+            return false
+        }
         val found = result != null
         return if (expectFound) found else !found
     }

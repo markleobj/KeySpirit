@@ -285,6 +285,11 @@ class ScriptEditActivity : AppCompatActivity() {
                 // 初始化可见性
                 updateIfVisibility(step.conditionType)
             }
+            StepType.MOVE_MOUSE, StepType.PICK_POINT -> {
+                inputs["x"] = addInput(layout, "X 坐标", step.x.toString())
+                inputs["y"] = addInput(layout, "Y 坐标", step.y.toString())
+                addCoordinatePickerButton(layout, inputs["x"]!!, inputs["y"]!!)
+            }
         }
 
         AlertDialog.Builder(this)

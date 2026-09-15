@@ -129,6 +129,27 @@ class AutoAccessibilityService : AccessibilityService() {
     }
 
     /**
+     * 移动鼠标（快速轻点模拟移动到指定位置）
+     */
+    fun moveTo(x: Int, y: Int, callback: GestureCallback? = null) {
+        val path = Path().apply {
+            moveTo(x.toFloat(), y.toFloat())
+        }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 10))
+            .build()
+        dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                callback?.onCompleted()
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                callback?.onCancelled()
+            }
+        }, handler)
+    }
+
+    /**
      * 获取屏幕尺寸
      */
     fun getScreenSize(): Point {

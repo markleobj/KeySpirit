@@ -33,7 +33,11 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
     private var script: Script? = null
 
     // 插入位置：空列表=末尾，非空=插入到该路径的 IF 块末尾
-    private var insertPath: List<Int> = emptyList()
+    var insertPath: List<Int> = emptyList()
+        set(value) {
+            field = value
+            updateInsertLabel()
+        }
     private var insertLabel: TextView? = null
 
     private val stepContainer: LinearLayout
@@ -46,6 +50,7 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             StepType.TOUCH_DOWN, StepType.TOUCH_UP,
             StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP
         ),
+        "鼠标操作" to listOf(StepType.MOVE_MOUSE, StepType.PICK_POINT),
         "滑动操作" to listOf(StepType.SWIPE),
         "截图" to listOf(StepType.SCREENSHOT),
         "控制流程" to listOf(StepType.IF, StepType.LOOP, StepType.DELAY),
@@ -177,6 +182,8 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
     private fun createCommandButton(type: StepType): View {
         val color = when (type) {
             StepType.SCREENSHOT -> "#E74C3C"
+            StepType.MOVE_MOUSE -> "#1ABC9C"
+            StepType.PICK_POINT -> "#16A085"
             StepType.IF -> "#3498DB"
             StepType.LOOP -> "#9B59B6"
             StepType.FIND_IMAGE, StepType.FIND_TEXT -> "#E67E22"
@@ -234,8 +241,9 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             val row = createStepRow(index, step, currentPath, depth)
             stepContainer.addView(row)
 
-            // IF 块的子步骤
-            if (step.type == StepType.IF && step.ifSteps.isNotEmpty()) {
+            // IF 块的子步骤（安全检查：ifSteps 可能为 null）
+            @Suppress("SENSELESS_COMPARISON")
+            if (step.type == StepType.IF && step.ifSteps != null && step.ifSteps.isNotEmpty()) {
                 renderSteps(step.ifSteps, currentPath, depth + 1)
             }
         }

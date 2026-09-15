@@ -31,6 +31,8 @@ object JsEngine {
                 StepType.RIGHT_CLICK -> sb.appendLine("rightClick(${step.x}, ${step.y}, ${step.duration});")
                 StepType.RIGHT_CLICK_DOWN -> sb.appendLine("rightClickDown(${step.x}, ${step.y}, ${step.duration});")
                 StepType.RIGHT_CLICK_UP -> sb.appendLine("rightClickUp(${step.x}, ${step.y});")
+                StepType.MOVE_MOUSE -> sb.appendLine("moveMouse(${step.x}, ${step.y});")
+                StepType.PICK_POINT -> sb.appendLine("// pick point (${step.x}, ${step.y})")
                 StepType.SWIPE -> sb.appendLine("swipe(${step.x1}, ${step.y1}, ${step.x2}, ${step.y2}, ${step.duration});")
                 StepType.LONG_PRESS -> sb.appendLine("longPress(${step.x}, ${step.y}, ${step.duration});")
                 StepType.SCREENSHOT -> sb.appendLine("screenshot(\"${step.imageName}\");")
@@ -81,6 +83,7 @@ object JsEngine {
         val longPressRegex = Regex("""longPress\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)""")
         val findImageRegex = Regex("""findImageClick\s*\(\s*"([^"]*)"\s*,\s*([\d.]+)\s*\)""")
         val findTextRegex = Regex("""findTextClick\s*\(\s*"([^"]*)"\s*\)""")
+        val moveMouseRegex = Regex("""moveMouse\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)""")
 
         for (line in lines) {
             val trimmed = line.trim()
@@ -145,6 +148,16 @@ object JsEngine {
                             steps.add(ScriptStep(
                                 type = StepType.FIND_TEXT,
                                 text = m.groupValues[1]
+                            ))
+                        }
+                    }
+                    moveMouseRegex.containsMatchIn(trimmed) -> {
+                        val m = moveMouseRegex.find(trimmed)
+                        if (m != null) {
+                            steps.add(ScriptStep(
+                                type = StepType.MOVE_MOUSE,
+                                x = m.groupValues[1].toIntOrNull() ?: 0,
+                                y = m.groupValues[2].toIntOrNull() ?: 0
                             ))
                         }
                     }

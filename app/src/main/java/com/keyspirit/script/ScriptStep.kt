@@ -60,6 +60,8 @@ data class ScriptStep(
             StepType.RIGHT_CLICK -> "右键点击 ($x, $y) ${duration}ms"
             StepType.RIGHT_CLICK_DOWN -> "右键按下 ($x, $y) ${duration}ms"
             StepType.RIGHT_CLICK_UP -> "右键抬起 ($x, $y)"
+            StepType.MOVE_MOUSE -> "移动鼠标 ($x, $y)"
+            StepType.PICK_POINT -> "取鼠标点 ($x, $y)"
             StepType.SWIPE -> "($x1,$y1) → ($x2,$y2) ${duration}ms"
             StepType.LONG_PRESS -> "长按 ($x, $y) ${duration}ms"
             StepType.SCREENSHOT -> {
@@ -84,7 +86,9 @@ data class ScriptStep(
                     3 -> "找不到文字: \"$conditionText\""
                     else -> "未知条件"
                 }
-                "如果 $condStr → 执行 ${ifSteps.size} 个步骤"
+                @Suppress("SENSELESS_COMPARISON")
+                val count = if (ifSteps == null) 0 else ifSteps.size
+                "如果 $condStr → 执行 $count 个步骤"
             }
         }
     }
