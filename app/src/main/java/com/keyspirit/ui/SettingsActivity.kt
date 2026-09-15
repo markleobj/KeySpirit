@@ -53,6 +53,7 @@ class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
+        com.keyspirit.util.TabletLayoutHelper.applyMaxWidth(this)
 
         switchAccessibility = findViewById(R.id.switchAccessibility)
         switchFloating = findViewById(R.id.switchFloating)

@@ -41,6 +41,7 @@ class ScriptEditActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_script_edit)
+        com.keyspirit.util.TabletLayoutHelper.applyMaxWidth(this)
 
         scriptManager = KeySpiritApp.instance.scriptManager
         val scriptId = intent.getStringExtra(EXTRA_SCRIPT_ID)

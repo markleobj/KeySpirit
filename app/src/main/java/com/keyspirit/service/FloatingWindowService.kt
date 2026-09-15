@@ -136,10 +136,11 @@ class FloatingWindowService : Service() {
             }
             onDrag = { x, y -> updateBallPosition(x, y) }
         }
-        val params = createOverlayParams(120, 120).apply {
+        val ballSize = resources.getDimensionPixelSize(R.dimen.floating_ball_size)
+        val params = createOverlayParams(ballSize, ballSize).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 100
-            y = 300
+            x = dp2px(100)
+            y = dp2px(300)
         }
         try {
             windowManager.addView(floatingBall!!, params)
@@ -196,7 +197,8 @@ class FloatingWindowService : Service() {
             x = ballParams.x
             // 确保面板不超出屏幕底部
             val displayMetrics = resources.displayMetrics
-            y = (ballParams.y + 130).coerceAtMost(displayMetrics.heightPixels - 200)
+            val ballSize = resources.getDimensionPixelSize(R.dimen.floating_ball_size)
+            y = (ballParams.y + ballSize + dp2px(8)).coerceAtMost(displayMetrics.heightPixels - ballSize - dp2px(8))
         }
         try {
             windowManager.addView(floatingPanel, params)
@@ -468,7 +470,7 @@ class FloatingWindowService : Service() {
             hint = "请输入项目名称"
             setText(if (script.name.isNotEmpty() && script.name != "新脚本" && script.name != "录制脚本") script.name else "")
             setSingleLine()
-            setPadding(32, 24, 32, 24)
+            setPadding(dp2px(32), dp2px(24), dp2px(32), dp2px(24))
         }
         android.app.AlertDialog.Builder(this)
             .setTitle("保存项目")
@@ -872,7 +874,7 @@ class FloatingWindowService : Service() {
             hint = "请输入图片名称（如：登录按钮、标题栏）"
             setText(existingStep?.imageName ?: "")
             setSingleLine()
-            setPadding(32, 24, 32, 24)
+            setPadding(dp2px(32), dp2px(24), dp2px(32), dp2px(24))
         }
         android.app.AlertDialog.Builder(this)
             .setTitle("命名截图")
@@ -1295,7 +1297,7 @@ class FloatingWindowService : Service() {
     private fun showFindTextDialog(left: Int, top: Int, right: Int, bottom: Int, existingStep: ScriptStep?) {
         val input = android.widget.EditText(this).apply {
             hint = "输入要查找的文字"
-            setPadding(32, 16, 32, 16)
+            setPadding(dp2px(32), dp2px(16), dp2px(32), dp2px(16))
         }
         android.app.AlertDialog.Builder(this)
             .setTitle("查找文字")
@@ -1331,7 +1333,7 @@ class FloatingWindowService : Service() {
             hint = "延迟毫秒数（如 500）"
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
             setText("500")
-            setPadding(32, 16, 32, 16)
+            setPadding(dp2px(32), dp2px(16), dp2px(32), dp2px(16))
         }
         android.app.AlertDialog.Builder(this)
             .setTitle("设置延迟")
@@ -1363,7 +1365,7 @@ class FloatingWindowService : Service() {
 
         val layout = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(48, 32, 48, 16)
+            setPadding(dp2px(48), dp2px(32), dp2px(48), dp2px(16))
         }
 
         val tvCount = android.widget.TextView(this).apply {
@@ -1383,7 +1385,7 @@ class FloatingWindowService : Service() {
             text = "起始步骤序号（从1开始）"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 13f
-            setPadding(0, 16, 0, 4)
+            setPadding(0, dp2px(16), 0, dp2px(4))
         }
         layout.addView(tvStart)
         val etStart = android.widget.EditText(this).apply {
@@ -1398,7 +1400,7 @@ class FloatingWindowService : Service() {
             text = "结束步骤序号"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 13f
-            setPadding(0, 16, 0, 4)
+            setPadding(0, dp2px(16), 0, dp2px(4))
         }
         layout.addView(tvEnd)
         val etEnd = android.widget.EditText(this).apply {
@@ -1413,7 +1415,7 @@ class FloatingWindowService : Service() {
             text = "提示：循环将重复执行从起始步骤到结束步骤之间的所有步骤"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 12f
-            setPadding(0, 16, 0, 0)
+            setPadding(0, dp2px(16), 0, 0)
         }
         layout.addView(tvHint)
 
@@ -1456,7 +1458,7 @@ class FloatingWindowService : Service() {
         val layout = android.widget.ScrollView(this)
         val innerLayout = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(48, 32, 48, 16)
+            setPadding(dp2px(48), dp2px(32), dp2px(48), dp2px(16))
         }
         layout.addView(innerLayout)
 
@@ -1484,7 +1486,7 @@ class FloatingWindowService : Service() {
             text = "目标图片路径"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 13f
-            setPadding(0, 16, 0, 4)
+            setPadding(0, dp2px(16), 0, dp2px(4))
         }
         innerLayout.addView(tvImg)
         val etImgPath = android.widget.EditText(this).apply {
@@ -1503,7 +1505,7 @@ class FloatingWindowService : Service() {
             text = "相似度 (0-1)"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 13f
-            setPadding(0, 16, 0, 4)
+            setPadding(0, dp2px(16), 0, dp2px(4))
         }
         innerLayout.addView(tvSim)
         val etSim = android.widget.EditText(this).apply {
@@ -1519,7 +1521,7 @@ class FloatingWindowService : Service() {
             text = "目标文字"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 13f
-            setPadding(0, 16, 0, 4)
+            setPadding(0, dp2px(16), 0, dp2px(4))
         }
         innerLayout.addView(tvText)
         val etText = android.widget.EditText(this).apply {
@@ -1535,7 +1537,7 @@ class FloatingWindowService : Service() {
             text = "超时时间(ms)"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 13f
-            setPadding(0, 16, 0, 4)
+            setPadding(0, dp2px(16), 0, dp2px(4))
         }
         innerLayout.addView(tvTimeout)
         val etTimeout = android.widget.EditText(this).apply {
@@ -1550,7 +1552,7 @@ class FloatingWindowService : Service() {
             text = "条件成立时执行的步骤"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 13f
-            setPadding(0, 16, 0, 4)
+            setPadding(0, dp2px(16), 0, dp2px(4))
         }
         innerLayout.addView(tvBlock)
 
@@ -1563,7 +1565,7 @@ class FloatingWindowService : Service() {
             text = "条件成立时，按顺序执行块内的所有步骤；不成立则全部跳过"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 12f
-            setPadding(0, 8, 0, 0)
+            setPadding(0, dp2px(8), 0, 0)
         }
         innerLayout.addView(tvHint)
         // ---- 块内步骤管理结束 ----
@@ -1722,7 +1724,7 @@ class FloatingWindowService : Service() {
 
         val tvSteps = android.widget.TextView(this).apply {
             text = buildStepsText()
-            setPadding(24, 16, 24, 16)
+            setPadding(dp2px(24), dp2px(16), dp2px(24), dp2px(16))
             textSize = 13f
             setTextColor(android.graphics.Color.BLACK)
         }
@@ -1900,7 +1902,7 @@ class FloatingWindowService : Service() {
             alpha = 0.7f
             visibility = View.GONE
         }
-        val indicatorSize = 30
+        val indicatorSize = resources.getDimensionPixelSize(R.dimen.touch_indicator_size)
         container.addView(touchIndicator, android.widget.FrameLayout.LayoutParams(indicatorSize, indicatorSize))
 
         // 坐标文本显示（屏幕左上角，实时显示 rawX/rawY）
@@ -1908,15 +1910,15 @@ class FloatingWindowService : Service() {
             setTextColor(android.graphics.Color.WHITE)
             setBackgroundColor(0xCC000000.toInt())
             textSize = 14f
-            setPadding(16, 8, 16, 8)
+            setPadding(dp2px(16), dp2px(8), dp2px(16), dp2px(8))
             text = "触摸坐标: (-, -)"
         }
         container.addView(coordTextView, android.widget.FrameLayout.LayoutParams(
             android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
             android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply {
-            leftMargin = 16
-            topMargin = 16
+            leftMargin = dp2px(16)
+            topMargin = dp2px(16)
         })
 
         container.setOnTouchListener { _, event ->
@@ -2392,7 +2394,7 @@ class FloatingWindowService : Service() {
             text = msg
             setTextColor(android.graphics.Color.WHITE)
             setBackgroundColor(0xCC000000.toInt())
-            setPadding(40, 20, 40, 20)
+            setPadding(dp2px(40), dp2px(20), dp2px(40), dp2px(20))
             textSize = 14f
         }
         val params = WindowManager.LayoutParams(
@@ -2621,7 +2623,7 @@ class FloatingWindowService : Service() {
         val input = android.widget.EditText(this).apply {
             hint = "请输入图片名称（如：登录按钮、标题栏）"
             setSingleLine()
-            setPadding(32, 24, 32, 24)
+            setPadding(dp2px(32), dp2px(24), dp2px(32), dp2px(24))
         }
         android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
             .setTitle("命名截图")
@@ -2761,11 +2763,11 @@ class FloatingWindowService : Service() {
             background = android.graphics.drawable.GradientDrawable().apply {
                 setColor(android.graphics.Color.parseColor("#E74C3C"))
                 shape = android.graphics.drawable.GradientDrawable.OVAL
-                setStroke(3, android.graphics.Color.parseColor("#FFFFFF"))
+                setStroke(resources.getDimensionPixelSize(R.dimen.indicator_stroke_width), android.graphics.Color.parseColor("#FFFFFF"))
             }
-            elevation = 10f
+            elevation = resources.getDimensionPixelSize(R.dimen.indicator_elevation).toFloat()
         }
-        val size = 24
+        val size = resources.getDimensionPixelSize(R.dimen.mouse_indicator_size)
         val params = createOverlayParams(size, size).apply {
             gravity = Gravity.TOP or Gravity.START
             x = 0
@@ -2797,8 +2799,10 @@ class FloatingWindowService : Service() {
         val indicator = mouseIndicator ?: return
         val params = indicator.layoutParams as? WindowManager.LayoutParams ?: return
         // 居中显示：指示器中心对齐坐标点
-        params.x = x - 12
-        params.y = y - 12
+        val indicatorSize = resources.getDimensionPixelSize(R.dimen.mouse_indicator_size)
+        val halfIndicator = indicatorSize / 2
+        params.x = x - halfIndicator
+        params.y = y - halfIndicator
         try {
             windowManager.updateViewLayout(indicator, params)
         } catch (_: Exception) {}
@@ -2819,6 +2823,13 @@ class FloatingWindowService : Service() {
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         )
+    }
+
+    /**
+     * 将 dp 值转换为像素值，用于代码中需要以 dp 为单位设置尺寸的场景
+     */
+    private fun dp2px(dp: Int): Int {
+        return (dp * resources.displayMetrics.density).toInt()
     }
 
     private fun hideAll() {

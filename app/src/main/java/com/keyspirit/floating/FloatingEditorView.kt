@@ -9,6 +9,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.keyspirit.R
 import com.keyspirit.script.Script
 import com.keyspirit.script.ScriptStep
 import com.keyspirit.script.StepType
@@ -19,6 +20,9 @@ import com.keyspirit.script.StepType
  * 右边 = 步骤列表（当前脚本步骤，缩进显示 IF 块）
  */
 class FloatingEditorView(context: Context) : LinearLayout(context) {
+
+    private fun dp(id: Int): Int = context.resources.getDimensionPixelSize(id)
+    private fun sp(id: Int): Float = context.resources.getDimension(id)
 
     interface EditorListener {
         fun onAddCommand(type: StepType, path: List<Int>)
@@ -59,23 +63,23 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
 
     init {
         orientation = HORIZONTAL
-        setPadding(8, 8, 8, 8)
+        setPadding(dp(R.dimen.editor_padding), dp(R.dimen.editor_padding), dp(R.dimen.editor_padding), dp(R.dimen.editor_padding))
         background = GradientDrawable().apply {
             setColor(Color.parseColor("#F01E1E1E"))
-            cornerRadius = 16f
+            cornerRadius = sp(R.dimen.editor_radius)
         }
 
         // ========== 左边：命令面板 ==========
         val cmdPanel = LinearLayout(context).apply {
             orientation = VERTICAL
-            setPadding(8, 8, 4, 8)
+            setPadding(dp(R.dimen.spacing_sm), dp(R.dimen.spacing_sm), dp(R.dimen.spacing_xs), dp(R.dimen.spacing_sm))
             layoutParams = LayoutParams(0, LayoutParams.MATCH_PARENT, 0.35f)
         }
         val cmdTitle = TextView(context).apply {
             text = "命令"
             setTextColor(Color.parseColor("#888888"))
-            textSize = 12f
-            setPadding(4, 0, 0, 4)
+            textSize = sp(R.dimen.editor_cmd_text_size)
+            setPadding(dp(R.dimen.spacing_xs), 0, 0, dp(R.dimen.spacing_xs))
         }
         cmdPanel.addView(cmdTitle)
 
@@ -91,8 +95,8 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             val groupLabel = TextView(context).apply {
                 text = groupName
                 setTextColor(Color.parseColor("#666666"))
-                textSize = 11f
-                setPadding(4, 8, 0, 4)
+                textSize = sp(R.dimen.editor_group_label_size)
+                setPadding(dp(R.dimen.spacing_xs), dp(R.dimen.spacing_sm), 0, dp(R.dimen.spacing_xs))
             }
             cmdList.addView(groupLabel)
             for (type in types) {
@@ -104,7 +108,7 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         // ========== 右边：步骤列表 ==========
         val stepPanel = LinearLayout(context).apply {
             orientation = VERTICAL
-            setPadding(4, 8, 8, 8)
+            setPadding(dp(R.dimen.spacing_xs), dp(R.dimen.spacing_sm), dp(R.dimen.spacing_sm), dp(R.dimen.spacing_sm))
             layoutParams = LayoutParams(0, LayoutParams.MATCH_PARENT, 0.65f)
         }
 
@@ -116,15 +120,15 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         val tvTitle = TextView(context).apply {
             text = "脚本步骤"
             setTextColor(Color.WHITE)
-            textSize = 14f
-            setPadding(4, 0, 0, 4)
+            textSize = sp(R.dimen.editor_title_size)
+            setPadding(dp(R.dimen.spacing_xs), 0, 0, dp(R.dimen.spacing_xs))
             layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
         }
         val btnClose = TextView(context).apply {
             text = "✕"
             setTextColor(Color.WHITE)
-            textSize = 16f
-            setPadding(12, 4, 8, 4)
+            textSize = sp(R.dimen.editor_close_size)
+            setPadding(dp(R.dimen.spacing_md), dp(R.dimen.spacing_xs), dp(R.dimen.spacing_sm), dp(R.dimen.spacing_xs))
             setOnClickListener { listener?.onClose() }
         }
         titleBar.addView(tvTitle)
@@ -135,8 +139,8 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         insertLabel = TextView(context).apply {
             text = "▶ 插入位置：末尾"
             setTextColor(Color.parseColor("#F39C12"))
-            textSize = 11f
-            setPadding(4, 2, 0, 4)
+            textSize = sp(R.dimen.editor_step_text_size)
+            setPadding(dp(R.dimen.spacing_xs), dp(R.dimen.editor_insert_top), 0, dp(R.dimen.spacing_xs))
         }
         stepPanel.addView(insertLabel!!)
 
@@ -153,17 +157,17 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         // 底部按钮
         val bottomBar = LinearLayout(context).apply {
             orientation = HORIZONTAL
-            setPadding(0, 8, 0, 0)
+            setPadding(0, dp(R.dimen.spacing_sm), 0, 0)
         }
         val btnSave = Button(context).apply {
             text = "保存"
-            textSize = 12f
+            textSize = sp(R.dimen.editor_cmd_text_size)
             layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { listener?.onSave() }
         }
         val btnRun = Button(context).apply {
             text = "运行"
-            textSize = 12f
+            textSize = sp(R.dimen.editor_cmd_text_size)
             layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { listener?.onRun() }
         }
@@ -193,16 +197,16 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         return TextView(context).apply {
             text = type.displayName
             setTextColor(Color.WHITE)
-            textSize = 12f
+            textSize = sp(R.dimen.editor_cmd_text_size)
             gravity = Gravity.CENTER
-            setPadding(8, 10, 8, 10)
+            setPadding(dp(R.dimen.editor_cmd_padding_h), dp(R.dimen.editor_cmd_padding_v), dp(R.dimen.editor_cmd_padding_h), dp(R.dimen.editor_cmd_padding_v))
             background = GradientDrawable().apply {
                 setColor(Color.parseColor(color))
-                cornerRadius = 8f
+                cornerRadius = sp(R.dimen.editor_cmd_radius)
                 alpha = 200
             }
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = 4
+                bottomMargin = dp(R.dimen.editor_cmd_margin)
             }
             setOnClickListener {
                 listener?.onAddCommand(type, insertPath)
@@ -222,8 +226,8 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             val empty = TextView(context).apply {
                 text = "暂无步骤\n点击左侧命令添加"
                 setTextColor(Color.parseColor("#555555"))
-                textSize = 12f
-                setPadding(16, 40, 16, 40)
+                textSize = sp(R.dimen.editor_cmd_text_size)
+                setPadding(dp(R.dimen.spacing_lg), dp(R.dimen.editor_empty_padding), dp(R.dimen.spacing_lg), dp(R.dimen.editor_empty_padding))
                 gravity = Gravity.CENTER
             }
             stepContainer.addView(empty)
@@ -258,28 +262,28 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(6, 8, 6, 8)
+            setPadding(dp(R.dimen.editor_step_padding_h), dp(R.dimen.editor_step_padding_v), dp(R.dimen.editor_step_padding_h), dp(R.dimen.editor_step_padding_v))
             background = when {
                 step.type == StepType.IF -> GradientDrawable().apply {
                     setColor(Color.parseColor("#1A3498DB"))
-                    cornerRadius = 6f
+                    cornerRadius = sp(R.dimen.editor_step_radius)
                 }
                 step.type == StepType.LOOP -> GradientDrawable().apply {
                     setColor(Color.parseColor("#1A9B59B6"))
-                    cornerRadius = 6f
+                    cornerRadius = sp(R.dimen.editor_step_radius)
                 }
                 depth > 0 -> GradientDrawable().apply {
                     setColor(Color.parseColor("#252525"))
-                    cornerRadius = 6f
+                    cornerRadius = sp(R.dimen.editor_step_radius)
                 }
                 else -> GradientDrawable().apply {
                     setColor(Color.parseColor("#2A2A2A"))
-                    cornerRadius = 6f
+                    cornerRadius = sp(R.dimen.editor_step_radius)
                 }
             }
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = 3
-                leftMargin = depth * 20
+                bottomMargin = dp(R.dimen.editor_step_row_margin)
+                leftMargin = depth * dp(R.dimen.editor_indent)
             }
         }
 
@@ -288,8 +292,8 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         val num = TextView(context).apply {
             text = "$prefix${index + 1}"
             setTextColor(Color.parseColor("#666666"))
-            textSize = 10f
-            setPadding(4, 0, 4, 0)
+            textSize = sp(R.dimen.editor_step_desc_size)
+            setPadding(dp(R.dimen.spacing_xs), 0, dp(R.dimen.spacing_xs), 0)
         }
 
         // 步骤信息
@@ -304,13 +308,13 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
                 step.type == StepType.LOOP -> Color.parseColor("#AF7AC5")
                 else -> Color.WHITE
             })
-            textSize = 11f
+            textSize = sp(R.dimen.editor_step_text_size)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
         val tvDesc = TextView(context).apply {
             text = step.getDescription()
             setTextColor(Color.parseColor("#999999"))
-            textSize = 10f
+            textSize = sp(R.dimen.editor_step_desc_size)
         }
         infoLayout.addView(tvType)
         infoLayout.addView(tvDesc)
@@ -320,8 +324,8 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             val btnInsert = TextView(context).apply {
                 text = "+子"
                 setTextColor(Color.parseColor("#2ECC71"))
-                textSize = 10f
-                setPadding(6, 0, 6, 0)
+                textSize = sp(R.dimen.editor_step_desc_size)
+                setPadding(dp(R.dimen.editor_step_padding_h), 0, dp(R.dimen.editor_step_padding_h), 0)
                 setOnClickListener {
                     insertPath = path
                     updateInsertLabel()
@@ -339,15 +343,15 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         val btnEdit = TextView(context).apply {
             text = "编"
             setTextColor(Color.parseColor("#3498DB"))
-            textSize = 10f
-            setPadding(6, 0, 6, 0)
+            textSize = sp(R.dimen.editor_step_desc_size)
+            setPadding(dp(R.dimen.editor_step_padding_h), 0, dp(R.dimen.editor_step_padding_h), 0)
             setOnClickListener { listener?.onEditStep(path, step) }
         }
         val btnDel = TextView(context).apply {
             text = "删"
             setTextColor(Color.parseColor("#E74C3C"))
-            textSize = 10f
-            setPadding(6, 0, 6, 0)
+            textSize = sp(R.dimen.editor_step_desc_size)
+            setPadding(dp(R.dimen.editor_step_padding_h), 0, dp(R.dimen.editor_step_padding_h), 0)
             setOnClickListener { listener?.onDeleteStep(path) }
         }
         row.addView(btnEdit)

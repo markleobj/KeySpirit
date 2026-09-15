@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 10寸+平板：间距更大 -->
+    <dimen name="spacing_xs">8dp</dimen>
+    <dimen name="spacing_sm">16dp</dimen>
+    <dimen name="spacing_md">20dp</dimen>
+    <dimen name="spacing_lg">24dp</dimen>
+    <dimen name="spacing_xl">36dp</dimen>
+    <dimen name="spacing_xxl">48dp</dimen>
+
+    <!-- 顶部标题栏 -->
+    <dimen name="toolbar_height">72dp</dimen>
+    <dimen name="toolbar_icon_size">44dp</dimen>
+    <dimen name="toolbar_title_size">24sp</dimen>
+
+    <!-- 设置页 -->
+    <dimen name="settings_padding">20dp</dimen>
+    <dimen name="settings_card_radius">16dp</dimen>
+    <dimen name="settings_item_padding">20dp</dimen>
+    <dimen name="settings_title_size">18sp</dimen>
+    <dimen name="settings_subtitle_size">15sp</dimen>
+    <dimen name="settings_section_size">16sp</dimen>
+
+    <!-- 脚本列表 -->
+    <dimen name="script_list_padding">20dp</dimen>
+    <dimen name="script_card_radius">16dp</dimen>
+    <dimen name="script_card_padding">20dp</dimen>
+    <dimen name="script_name_size">19sp</dimen>
+    <dimen name="script_info_size">15sp</dimen>
+
+    <!-- 步骤列表 -->
+    <dimen name="step_card_radius">14dp</dimen>
+    <dimen name="step_card_padding">18dp</dimen>
+    <dimen name="step_num_size">32dp</dimen>
+    <dimen name="step_title_size">18sp</dimen>
+    <dimen name="step_desc_size">15sp</dimen>
+    <dimen name="step_btn_size">14sp</dimen>
+
+    <!-- 脚本编辑 -->
+    <dimen name="edit_name_size">22sp</dimen>
+    <dimen name="edit_tab_size">17sp</dimen>
+    <dimen name="edit_code_size">16sp</dimen>
+    <dimen name="edit_back_btn">48dp</dimen>
+
+    <!-- 悬浮球 -->
+    <dimen name="floating_ball_size">72dp</dimen>
+
+    <!-- 指示器 -->
+    <dimen name="mouse_indicator_size">32dp</dimen>
+    <dimen name="touch_indicator_size">38dp</dimen>
+    <dimen name="indicator_stroke_width">4dp</dimen>
+    <dimen name="indicator_elevation">10dp</dimen>
+
+    <!-- 悬浮面板按钮 -->
+    <dimen name="floating_btn_text_size">18sp</dimen>
+    <dimen name="floating_btn_padding_h">32dp</dimen>
+    <dimen name="floating_btn_padding_v">20dp</dimen>
+    <dimen name="floating_btn_margin">16dp</dimen>
+    <dimen name="floating_panel_padding">24dp</dimen>
+    <dimen name="floating_panel_radius">32dp</dimen>
+    <dimen name="floating_info_text_size">15sp</dimen>
+    <dimen name="floating_info_padding_h">16dp</dimen>
+
+    <!-- 悬浮编辑器 -->
+    <dimen name="editor_padding">16dp</dimen>
+    <dimen name="editor_radius">24dp</dimen>
+    <dimen name="editor_cmd_text_size">16sp</dimen>
+    <dimen name="editor_cmd_padding_h">12dp</dimen>
+    <dimen name="editor_cmd_padding_v">14dp</dimen>
+    <dimen name="editor_cmd_radius">12dp</dimen>
+    <dimen name="editor_cmd_margin">6dp</dimen>
+    <dimen name="editor_step_text_size">15sp</dimen>
+    <dimen name="editor_step_desc_size">13sp</dimen>
+    <dimen name="editor_step_padding_h">10dp</dimen>
+    <dimen name="editor_step_padding_v">12dp</dimen>
+    <dimen name="editor_step_radius">10dp</dimen>
+    <dimen name="editor_indent">36dp</dimen>
+    <dimen name="editor_group_label_size">15sp</dimen>
+    <dimen name="editor_title_size">18sp</dimen>
+    <dimen name="editor_close_size">20sp</dimen>
+    <dimen name="editor_insert_top">4dp</dimen>
+    <dimen name="editor_step_row_margin">6dp</dimen>
+    <dimen name="editor_empty_padding">60dp</dimen>
+
+    <!-- 内容区域最大宽度（大平板限制宽度） -->
+    <dimen name="content_max_width">720dp</dimen>
+</resources>

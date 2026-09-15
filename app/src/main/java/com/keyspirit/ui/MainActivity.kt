@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        com.keyspirit.util.TabletLayoutHelper.applyMaxWidth(this)
 
         scriptManager = KeySpiritApp.instance.scriptManager
         recyclerView = findViewById(R.id.scriptList)

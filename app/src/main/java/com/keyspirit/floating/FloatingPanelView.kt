@@ -7,6 +7,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.keyspirit.R
 
 class FloatingPanelView(context: Context) : LinearLayout(context) {
 
@@ -24,12 +25,16 @@ class FloatingPanelView(context: Context) : LinearLayout(context) {
 
     private val container: LinearLayout
 
+    private fun dp(id: Int): Int = context.resources.getDimensionPixelSize(id)
+    private fun sp(id: Int): Float = context.resources.getDimension(id)
+
     init {
         orientation = HORIZONTAL
-        setPadding(16, 16, 16, 16)
+        val pad = dp(R.dimen.floating_panel_padding)
+        setPadding(pad, pad, pad, pad)
         background = GradientDrawable().apply {
             setColor(Color.parseColor("#E6000000"))
-            cornerRadius = 24f
+            cornerRadius = dp(R.dimen.floating_panel_radius).toFloat()
         }
         container = this
     }
@@ -65,31 +70,34 @@ class FloatingPanelView(context: Context) : LinearLayout(context) {
     }
 
     private fun addButton(text: String, color: String, onClick: () -> Unit) {
+        val padH = dp(R.dimen.floating_btn_padding_h)
+        val padV = dp(R.dimen.floating_btn_padding_v)
         val btn = TextView(context).apply {
             this.text = text
             setTextColor(Color.WHITE)
-            textSize = 14f
+            textSize = sp(R.dimen.floating_btn_text_size)
             gravity = Gravity.CENTER
-            setPadding(24, 16, 24, 16)
+            setPadding(padH, padV, padH, padV)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor(color))
-                cornerRadius = 16f
+                cornerRadius = dp(R.dimen.floating_panel_radius).toFloat()
             }
             setOnClickListener { onClick() }
         }
         val params = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-            marginEnd = 8
+            marginEnd = dp(R.dimen.floating_btn_margin)
         }
         addView(btn, params)
     }
 
     private fun addInfoText(text: String) {
+        val padH = dp(R.dimen.floating_info_padding_h)
         val tv = TextView(context).apply {
             this.text = text
             setTextColor(Color.WHITE)
-            textSize = 12f
+            textSize = sp(R.dimen.floating_info_text_size)
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(8, 0, 8, 0)
+            setPadding(padH, 0, padH, 0)
         }
         addView(tv)
     }
