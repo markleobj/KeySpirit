@@ -50,8 +50,7 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
     private val stepContainer: LinearLayout
     private val stepScrollView: ScrollView
 
-    // 记录每个块的展开状态，key = path 的字符串形式
-    private val expandedPaths = mutableSetOf<String>()
+    // 记录当前选中插入位置的行（用于高亮显示）
 
     // 所有命令分类
     private val commandGroups = listOf(
@@ -244,93 +243,54 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
     }
 
     /**
-     * 递归渲染一组步骤（树形折叠/展开模式）
+     * 递归渲染一组步骤（平铺模式，始终显示开始/结束标记）
+     * LOOP 和 IF 显示为：开始行 → 子步骤(缩进) → 结束行
      */
     private fun renderSteps(steps: MutableList<ScriptStep>, parentPath: List<Int>, depth: Int) {
         steps.forEachIndexed { index, step ->
             val currentPath = parentPath + index
-            val pathKey = currentPath.joinToString(",")
 
-            // 判断是否是块类型（有子步骤的 LOOP 或 IF）
-            val isBlock = (step.type == StepType.LOOP || step.type == StepType.IF)
-            @Suppress("SENSELESS_COMPARISON")
-            val hasChildren = isBlock && (
-                (step.type == StepType.IF && step.ifSteps != null && step.ifSteps.isNotEmpty()) ||
-                (step.type == StepType.LOOP && step.loopSteps != null && step.loopSteps.isNotEmpty())
-            )
-            val isExpanded = expandedPaths.contains(pathKey)
-
-            // 创建步骤行
-            val row = createStepRow(index, step, currentPath, depth, isBlock, hasChildren, isExpanded)
-            stepContainer.addView(row)
-
-            // 如果是展开状态且有子步骤，递归渲染子步骤
-            if (isBlock && isExpanded && hasChildren) {
-                val childSteps = when (step.type) {
-                    StepType.IF -> step.ifSteps
-                    StepType.LOOP -> step.loopSteps
-                    else -> mutableListOf()
+            if (step.type == StepType.LOOP) {
+                // 循环开始行
+                stepContainer.addView(createBlockStartRow(index, step, currentPath, depth, "循环开始"))
+                // 子步骤（始终显示）
+                @Suppress("SENSELESS_COMPARISON")
+                val childSteps = if (step.loopSteps != null) step.loopSteps else mutableListOf()
+                if (childSteps.isNotEmpty()) {
+                    renderSteps(childSteps, currentPath, depth + 1)
                 }
-                renderSteps(childSteps, currentPath, depth + 1)
-
-                // 添加结束标记
-                val endText = if (step.type == StepType.IF) "条件结束" else "循环结束"
-                stepContainer.addView(createEndMarker(endText, depth))
+                // 循环结束行
+                stepContainer.addView(createBlockEndRow("循环结束", depth, currentPath, step))
+            } else if (step.type == StepType.IF) {
+                // 条件开始行
+                stepContainer.addView(createBlockStartRow(index, step, currentPath, depth, "条件开始"))
+                // 子步骤（始终显示）
+                @Suppress("SENSELESS_COMPARISON")
+                val childSteps = if (step.ifSteps != null) step.ifSteps else mutableListOf()
+                if (childSteps.isNotEmpty()) {
+                    renderSteps(childSteps, currentPath, depth + 1)
+                }
+                // 条件结束行
+                stepContainer.addView(createBlockEndRow("条件结束", depth, currentPath, step))
+            } else {
+                // 普通步骤
+                stepContainer.addView(createStepRow(index, step, currentPath, depth))
             }
         }
     }
 
     /**
-     * 创建块结束标记行
+     * 创建块开始行
+     * [+] 循环开始 3次    编  删
      */
-    private fun createEndMarker(text: String, depth: Int): View {
-        return TextView(context).apply {
-            this.text = "── $text ──"
-            setTextColor(Color.parseColor("#555555"))
-            textSize = sp(R.dimen.editor_step_desc_size)
-            gravity = Gravity.CENTER
-            setPadding(0, dp(R.dimen.spacing_xs), 0, dp(R.dimen.spacing_xs))
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-                leftMargin = depth * dp(R.dimen.editor_indent)
-            }
-        }
-    }
-
-    /**
-     * 创建步骤行
-     * 块类型（LOOP/IF）有折叠/展开按钮（+/−）
-     * 非块类型只有编辑/删除按钮
-     */
-    private fun createStepRow(
-        index: Int,
-        step: ScriptStep,
-        path: List<Int>,
-        depth: Int,
-        isBlock: Boolean,
-        hasChildren: Boolean,
-        isExpanded: Boolean
-    ): View {
+    private fun createBlockStartRow(index: Int, step: ScriptStep, path: List<Int>, depth: Int, label: String): View {
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(R.dimen.editor_step_padding_h), dp(R.dimen.editor_step_padding_v), dp(R.dimen.editor_step_padding_h), dp(R.dimen.editor_step_padding_v))
-            background = when {
-                step.type == StepType.IF -> GradientDrawable().apply {
-                    setColor(Color.parseColor("#1A3498DB"))
-                    cornerRadius = dp(R.dimen.editor_step_radius).toFloat()
-                }
-                step.type == StepType.LOOP -> GradientDrawable().apply {
-                    setColor(Color.parseColor("#1A9B59B6"))
-                    cornerRadius = dp(R.dimen.editor_step_radius).toFloat()
-                }
-                depth > 0 -> GradientDrawable().apply {
-                    setColor(Color.parseColor("#252525"))
-                    cornerRadius = dp(R.dimen.editor_step_radius).toFloat()
-                }
-                else -> GradientDrawable().apply {
-                    setColor(Color.parseColor("#2A2A2A"))
-                    cornerRadius = dp(R.dimen.editor_step_radius).toFloat()
-                }
+            background = GradientDrawable().apply {
+                setColor(if (step.type == StepType.LOOP) Color.parseColor("#2A9B59B6") else Color.parseColor("#2A3498DB"))
+                cornerRadius = dp(R.dimen.editor_step_radius).toFloat()
             }
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
                 bottomMargin = dp(R.dimen.editor_step_row_margin)
@@ -338,34 +298,106 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             }
         }
 
-        // 块类型：折叠/展开按钮（+/−）
-        if (isBlock) {
-            val toggleBtn = TextView(context).apply {
-                text = if (isExpanded) "−" else "+"
-                setTextColor(if (hasChildren) Color.parseColor("#F39C12") else Color.parseColor("#555555"))
-                textSize = sp(R.dimen.editor_step_text_size)
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                setPadding(dp(R.dimen.spacing_xs), 0, dp(R.dimen.spacing_xs), 0)
-                setOnClickListener {
-                    val pathKey = path.joinToString(",")
-                    if (expandedPaths.contains(pathKey)) {
-                        expandedPaths.remove(pathKey)
-                    } else {
-                        expandedPaths.add(pathKey)
-                    }
-                    refreshStepList()
-                }
+        // + 按钮（设置插入位置到此块内）
+        val btnPlus = TextView(context).apply {
+            text = "+"
+            setTextColor(Color.parseColor("#F39C12"))
+            textSize = sp(R.dimen.editor_step_text_size)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setPadding(dp(R.dimen.spacing_xs), 0, dp(R.dimen.spacing_xs), 0)
+            setOnClickListener {
+                insertPath = path
             }
-            row.addView(toggleBtn)
-        } else {
-            // 非块类型：占位空格保持对齐
-            val spacer = TextView(context).apply {
-                text = " "
-                textSize = sp(R.dimen.editor_step_text_size)
-                setPadding(dp(R.dimen.spacing_xs), 0, dp(R.dimen.spacing_xs), 0)
-            }
-            row.addView(spacer)
         }
+        row.addView(btnPlus)
+
+        // 标签（循环开始/条件开始）
+        val tvLabel = TextView(context).apply {
+            text = label
+            setTextColor(if (step.type == StepType.LOOP) Color.parseColor("#AF7AC5") else Color.parseColor("#5DADE2"))
+            textSize = sp(R.dimen.editor_step_text_size)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setPadding(dp(R.dimen.spacing_xs), 0, dp(R.dimen.spacing_xs), 0)
+        }
+        row.addView(tvLabel)
+
+        // 描述
+        val tvDesc = TextView(context).apply {
+            text = step.getDescription()
+            setTextColor(Color.parseColor("#999999"))
+            textSize = sp(R.dimen.editor_step_desc_size)
+            layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+        }
+        row.addView(tvDesc)
+
+        // 编辑/删除
+        val btnEdit = TextView(context).apply {
+            text = "编"
+            setTextColor(Color.parseColor("#3498DB"))
+            textSize = sp(R.dimen.editor_step_desc_size)
+            setPadding(dp(R.dimen.editor_step_padding_h), 0, dp(R.dimen.editor_step_padding_h), 0)
+            setOnClickListener { listener?.onEditStep(path, step) }
+        }
+        val btnDel = TextView(context).apply {
+            text = "删"
+            setTextColor(Color.parseColor("#E74C3C"))
+            textSize = sp(R.dimen.editor_step_desc_size)
+            setPadding(dp(R.dimen.editor_step_padding_h), 0, dp(R.dimen.editor_step_padding_h), 0)
+            setOnClickListener { listener?.onDeleteStep(path) }
+        }
+        row.addView(btnEdit)
+        row.addView(btnDel)
+        return row
+    }
+
+    /**
+     * 创建块结束行
+     * ── 循环结束 ──
+     */
+    private fun createBlockEndRow(label: String, depth: Int, path: List<Int>, step: ScriptStep): View {
+        return TextView(context).apply {
+            text = "── $label ──"
+            setTextColor(Color.parseColor("#666666"))
+            textSize = sp(R.dimen.editor_step_desc_size)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(R.dimen.spacing_xs), 0, dp(R.dimen.spacing_xs))
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                leftMargin = depth * dp(R.dimen.editor_indent)
+                bottomMargin = dp(R.dimen.editor_step_row_margin)
+            }
+        }
+    }
+
+    /**
+     * 创建普通步骤行（非 LOOP/IF）
+     */
+    private fun createStepRow(
+        index: Int,
+        step: ScriptStep,
+        path: List<Int>,
+        depth: Int
+    ): View {
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(R.dimen.editor_step_padding_h), dp(R.dimen.editor_step_padding_v), dp(R.dimen.editor_step_padding_h), dp(R.dimen.editor_step_padding_v))
+            background = GradientDrawable().apply {
+                setColor(if (depth > 0) Color.parseColor("#252525") else Color.parseColor("#2A2A2A"))
+                cornerRadius = dp(R.dimen.editor_step_radius).toFloat()
+            }
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(R.dimen.editor_step_row_margin)
+                leftMargin = depth * dp(R.dimen.editor_indent)
+            }
+        }
+
+        // 占位空格（与开始行的 + 对齐）
+        val spacer = TextView(context).apply {
+            text = "  "
+            textSize = sp(R.dimen.editor_step_text_size)
+            setPadding(dp(R.dimen.spacing_xs), 0, dp(R.dimen.spacing_xs), 0)
+        }
+        row.addView(spacer)
 
         // 序号
         val prefix = if (depth > 0) "└ " else ""
@@ -384,11 +416,7 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         }
         val tvType = TextView(context).apply {
             text = step.type.displayName
-            setTextColor(when {
-                step.type == StepType.IF -> Color.parseColor("#5DADE2")
-                step.type == StepType.LOOP -> Color.parseColor("#AF7AC5")
-                else -> Color.WHITE
-            })
+            setTextColor(Color.WHITE)
             textSize = sp(R.dimen.editor_step_text_size)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
@@ -400,23 +428,6 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         infoLayout.addView(tvType)
         infoLayout.addView(tvDesc)
         row.addView(infoLayout)
-
-        // 块类型：设为插入点按钮
-        if (isBlock) {
-            val btnInsert = TextView(context).apply {
-                text = "插入"
-                setTextColor(Color.parseColor("#2ECC71"))
-                textSize = sp(R.dimen.editor_step_desc_size)
-                setPadding(dp(R.dimen.editor_step_padding_h), 0, dp(R.dimen.editor_step_padding_h), 0)
-                setOnClickListener {
-                    insertPath = path
-                    // 自动展开此块
-                    expandedPaths.add(path.joinToString(","))
-                    refreshStepList()
-                }
-            }
-            row.addView(btnInsert)
-        }
 
         // 编辑/删除
         val btnEdit = TextView(context).apply {

@@ -11,8 +11,8 @@ android {
         applicationId = "com.keyspirit"
         minSdk = 24
         targetSdk = 34
-        versionCode = 52
-        versionName = "1.14.3"
+        versionCode = 53
+        versionName = "1.14.4"
     }
 
     signingConfigs {
