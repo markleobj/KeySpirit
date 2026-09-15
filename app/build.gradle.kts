@@ -15,9 +15,19 @@ android {
         versionName = "1.13.0"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("release-keystore.jks")
+            storePassword = "keyspirit123"
+            keyAlias = "keyspirit"
+            keyPassword = "keyspirit123"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
