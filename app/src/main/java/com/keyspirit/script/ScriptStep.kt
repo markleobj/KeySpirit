@@ -19,6 +19,7 @@ data class ScriptStep(
     var randomDelay: Long = 0,
     // 找图相关
     var imagePath: String = "",
+    var imageName: String = "",
     var similarity: Double = 0.9,
     var findTimeout: Long = 5000,
     // 找文字相关
@@ -61,6 +62,10 @@ data class ScriptStep(
             StepType.RIGHT_CLICK_UP -> "右键抬起 ($x, $y)"
             StepType.SWIPE -> "($x1,$y1) → ($x2,$y2) ${duration}ms"
             StepType.LONG_PRESS -> "长按 ($x, $y) ${duration}ms"
+            StepType.SCREENSHOT -> {
+                val name = imageName.ifEmpty { imagePath.substringAfterLast('/') }
+                "截图: $name"
+            }
             StepType.DELAY -> if (randomDelay > 0) "${delay}~${delay + randomDelay}ms" else "${delay}ms"
             StepType.FIND_IMAGE -> {
                 val regionStr = if (useRegion) " [区域:($regionLeft,$regionTop)-($regionRight,$regionBottom)]" else ""

@@ -33,6 +33,7 @@ object JsEngine {
                 StepType.RIGHT_CLICK_UP -> sb.appendLine("rightClickUp(${step.x}, ${step.y});")
                 StepType.SWIPE -> sb.appendLine("swipe(${step.x1}, ${step.y1}, ${step.x2}, ${step.y2}, ${step.duration});")
                 StepType.LONG_PRESS -> sb.appendLine("longPress(${step.x}, ${step.y}, ${step.duration});")
+                StepType.SCREENSHOT -> sb.appendLine("screenshot(\"${step.imageName}\");")
                 StepType.DELAY -> {
                     if (step.randomDelay > 0) {
                         sb.appendLine("sleep(${step.delay} + Math.random() * ${step.randomDelay});")

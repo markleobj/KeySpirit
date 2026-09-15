@@ -9,6 +9,7 @@ enum class StepType(val typeName: String, val displayName: String) {
     RIGHT_CLICK_UP("right_click_up", "右键抬起"),
     SWIPE("swipe", "滑动"),
     LONG_PRESS("long_press", "长按"),
+    SCREENSHOT("screenshot", "截图"),
     DELAY("delay", "延迟"),
     FIND_IMAGE("find_image", "找图"),
     FIND_TEXT("find_text", "找文字"),

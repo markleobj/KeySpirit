@@ -14,13 +14,14 @@ import com.keyspirit.script.ScriptStep
 import com.keyspirit.script.StepType
 
 /**
- * 悬浮脚本编辑器：列表式编辑，IF/LOOP 块内子步骤缩进显示
- * 参考按键精灵的清晰结构
+ * 悬浮脚本编辑器：按键精灵风格
+ * 左边 = 命令面板（所有可用命令，点击即添加）
+ * 右边 = 步骤列表（当前脚本步骤，缩进显示 IF 块）
  */
 class FloatingEditorView(context: Context) : LinearLayout(context) {
 
     interface EditorListener {
-        fun onAddStep(type: StepType, path: List<Int>)
+        fun onAddCommand(type: StepType, path: List<Int>)
         fun onEditStep(path: List<Int>, step: ScriptStep)
         fun onDeleteStep(path: List<Int>)
         fun onSave()
@@ -31,15 +32,75 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
     var listener: EditorListener? = null
     private var script: Script? = null
 
+    // 插入位置：空列表=末尾，非空=插入到该路径的 IF 块末尾
+    private var insertPath: List<Int> = emptyList()
+    private var insertLabel: TextView? = null
+
     private val stepContainer: LinearLayout
-    private val scrollView: ScrollView
+    private val stepScrollView: ScrollView
+
+    // 所有命令分类
+    private val commandGroups = listOf(
+        "点击操作" to listOf(
+            StepType.CLICK, StepType.LONG_PRESS,
+            StepType.TOUCH_DOWN, StepType.TOUCH_UP,
+            StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP
+        ),
+        "滑动操作" to listOf(StepType.SWIPE),
+        "截图" to listOf(StepType.SCREENSHOT),
+        "控制流程" to listOf(StepType.IF, StepType.LOOP, StepType.DELAY),
+        "查找识别" to listOf(StepType.FIND_IMAGE, StepType.FIND_TEXT)
+    )
 
     init {
-        orientation = VERTICAL
-        setPadding(16, 16, 16, 16)
+        orientation = HORIZONTAL
+        setPadding(8, 8, 8, 8)
         background = GradientDrawable().apply {
             setColor(Color.parseColor("#F01E1E1E"))
-            cornerRadius = 20f
+            cornerRadius = 16f
+        }
+
+        // ========== 左边：命令面板 ==========
+        val cmdPanel = LinearLayout(context).apply {
+            orientation = VERTICAL
+            setPadding(8, 8, 4, 8)
+            layoutParams = LayoutParams(0, LayoutParams.MATCH_PARENT, 0.35f)
+        }
+        val cmdTitle = TextView(context).apply {
+            text = "命令"
+            setTextColor(Color.parseColor("#888888"))
+            textSize = 12f
+            setPadding(4, 0, 0, 4)
+        }
+        cmdPanel.addView(cmdTitle)
+
+        val cmdScroll = ScrollView(context).apply {
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
+        }
+        val cmdList = LinearLayout(context).apply { orientation = VERTICAL }
+        cmdScroll.addView(cmdList)
+        cmdPanel.addView(cmdScroll)
+
+        // 填充命令按钮
+        for ((groupName, types) in commandGroups) {
+            val groupLabel = TextView(context).apply {
+                text = groupName
+                setTextColor(Color.parseColor("#666666"))
+                textSize = 11f
+                setPadding(4, 8, 0, 4)
+            }
+            cmdList.addView(groupLabel)
+            for (type in types) {
+                val btn = createCommandButton(type)
+                cmdList.addView(btn)
+            }
+        }
+
+        // ========== 右边：步骤列表 ==========
+        val stepPanel = LinearLayout(context).apply {
+            orientation = VERTICAL
+            setPadding(4, 8, 8, 8)
+            layoutParams = LayoutParams(0, LayoutParams.MATCH_PARENT, 0.65f)
         }
 
         // 标题栏
@@ -48,65 +109,98 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             gravity = Gravity.CENTER_VERTICAL
         }
         val tvTitle = TextView(context).apply {
-            text = "脚本编辑"
+            text = "脚本步骤"
             setTextColor(Color.WHITE)
-            textSize = 16f
-            setPadding(8, 8, 8, 8)
+            textSize = 14f
+            setPadding(4, 0, 0, 4)
             layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
         }
         val btnClose = TextView(context).apply {
             text = "✕"
             setTextColor(Color.WHITE)
-            textSize = 18f
-            setPadding(16, 8, 16, 8)
+            textSize = 16f
+            setPadding(12, 4, 8, 4)
             setOnClickListener { listener?.onClose() }
         }
         titleBar.addView(tvTitle)
         titleBar.addView(btnClose)
-        addView(titleBar)
+        stepPanel.addView(titleBar)
 
-        // 步骤列表（可滚动）
-        scrollView = ScrollView(context)
+        // 插入位置提示
+        insertLabel = TextView(context).apply {
+            text = "▶ 插入位置：末尾"
+            setTextColor(Color.parseColor("#F39C12"))
+            textSize = 11f
+            setPadding(4, 2, 0, 4)
+        }
+        stepPanel.addView(insertLabel!!)
+
+        // 步骤列表
+        stepScrollView = ScrollView(context).apply {
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
+        }
         stepContainer = LinearLayout(context).apply {
             orientation = VERTICAL
         }
-        scrollView.addView(stepContainer)
-        val scrollParams = LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply {
-            topMargin = 8
-            bottomMargin = 8
-        }
-        addView(scrollView, scrollParams)
+        stepScrollView.addView(stepContainer)
+        stepPanel.addView(stepScrollView)
 
-        // 底部：保存 / 运行 / 添加步骤
+        // 底部按钮
         val bottomBar = LinearLayout(context).apply {
-            orientation = VERTICAL
-            setPadding(0, 8, 0, 0)
-        }
-        val btnAdd = Button(context).apply {
-            text = "+ 添加步骤"
-            setOnClickListener { showStepTypeMenu(emptyList()) }
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
-        }
-        bottomBar.addView(btnAdd)
-
-        val bottomActions = LinearLayout(context).apply {
             orientation = HORIZONTAL
             setPadding(0, 8, 0, 0)
         }
         val btnSave = Button(context).apply {
             text = "保存"
+            textSize = 12f
             layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { listener?.onSave() }
         }
         val btnRun = Button(context).apply {
             text = "运行"
+            textSize = 12f
             layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { listener?.onRun() }
         }
-        bottomActions.addView(btnSave)
-        bottomActions.addView(btnRun)
-        bottomBar.addView(bottomActions)
-        addView(bottomBar)
+        bottomBar.addView(btnSave)
+        bottomBar.addView(btnRun)
+        stepPanel.addView(bottomBar)
+
+        // 组装左右面板
+        addView(cmdPanel)
+        addView(stepPanel)
+    }
+
+    /**
+     * 创建左侧命令按钮
+     */
+    private fun createCommandButton(type: StepType): View {
+        val color = when (type) {
+            StepType.SCREENSHOT -> "#E74C3C"
+            StepType.IF -> "#3498DB"
+            StepType.LOOP -> "#9B59B6"
+            StepType.FIND_IMAGE, StepType.FIND_TEXT -> "#E67E22"
+            StepType.DELAY -> "#95A5A6"
+            else -> "#2E7D32"
+        }
+        return TextView(context).apply {
+            text = type.displayName
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setPadding(8, 10, 8, 10)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor(color))
+                cornerRadius = 8f
+                alpha = 200
+            }
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = 4
+            }
+            setOnClickListener {
+                listener?.onAddCommand(type, insertPath)
+            }
+        }
     }
 
     fun setScript(s: Script) {
@@ -119,24 +213,20 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         val steps = script?.steps ?: return
         if (steps.isEmpty()) {
             val empty = TextView(context).apply {
-                text = "暂无步骤，点击下方\"添加步骤\"开始"
-                setTextColor(Color.parseColor("#888888"))
-                textSize = 13f
-                setPadding(16, 32, 16, 32)
+                text = "暂无步骤\n点击左侧命令添加"
+                setTextColor(Color.parseColor("#555555"))
+                textSize = 12f
+                setPadding(16, 40, 16, 40)
                 gravity = Gravity.CENTER
             }
             stepContainer.addView(empty)
             return
         }
-        // 递归渲染根级别步骤
         renderSteps(steps, emptyList(), 0)
     }
 
     /**
      * 递归渲染一组步骤
-     * @param steps 步骤列表
-     * @param parentPath 父路径（用于定位）
-     * @param depth 缩进深度
      */
     private fun renderSteps(steps: MutableList<ScriptStep>, parentPath: List<Int>, depth: Int) {
         steps.forEachIndexed { index, step ->
@@ -144,11 +234,10 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             val row = createStepRow(index, step, currentPath, depth)
             stepContainer.addView(row)
 
-            // 如果是 IF 或 LOOP 类型，递归渲染其子步骤
+            // IF 块的子步骤
             if (step.type == StepType.IF && step.ifSteps.isNotEmpty()) {
                 renderSteps(step.ifSteps, currentPath, depth + 1)
             }
-            // LOOP 暂时用 loopStartIndex/loopEndIndex 范围式，没有子步骤列表
         }
     }
 
@@ -161,28 +250,28 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(8, 10, 8, 10)
+            setPadding(6, 8, 6, 8)
             background = when {
                 step.type == StepType.IF -> GradientDrawable().apply {
                     setColor(Color.parseColor("#1A3498DB"))
-                    cornerRadius = 8f
+                    cornerRadius = 6f
                 }
                 step.type == StepType.LOOP -> GradientDrawable().apply {
                     setColor(Color.parseColor("#1A9B59B6"))
-                    cornerRadius = 8f
+                    cornerRadius = 6f
                 }
                 depth > 0 -> GradientDrawable().apply {
                     setColor(Color.parseColor("#252525"))
-                    cornerRadius = 8f
+                    cornerRadius = 6f
                 }
                 else -> GradientDrawable().apply {
                     setColor(Color.parseColor("#2A2A2A"))
-                    cornerRadius = 8f
+                    cornerRadius = 6f
                 }
             }
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = 4
-                leftMargin = depth * 24
+                bottomMargin = 3
+                leftMargin = depth * 20
             }
         }
 
@@ -190,9 +279,9 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         val prefix = if (depth > 0) "└ " else ""
         val num = TextView(context).apply {
             text = "$prefix${index + 1}"
-            setTextColor(Color.parseColor("#888888"))
-            textSize = 11f
-            setPadding(4, 0, 6, 0)
+            setTextColor(Color.parseColor("#666666"))
+            textSize = 10f
+            setPadding(4, 0, 4, 0)
         }
 
         // 步骤信息
@@ -207,76 +296,73 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
                 step.type == StepType.LOOP -> Color.parseColor("#AF7AC5")
                 else -> Color.WHITE
             })
-            textSize = 12f
+            textSize = 11f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
         val tvDesc = TextView(context).apply {
             text = step.getDescription()
-            setTextColor(Color.parseColor("#BBBBBB"))
-            textSize = 11f
+            setTextColor(Color.parseColor("#999999"))
+            textSize = 10f
         }
         infoLayout.addView(tvType)
         infoLayout.addView(tvDesc)
 
-        // 操作按钮
-        val btnAddSub = if (step.type == StepType.IF) {
-            TextView(context).apply {
+        // IF 类型加一个「设为插入点」按钮
+        if (step.type == StepType.IF) {
+            val btnInsert = TextView(context).apply {
                 text = "+子"
                 setTextColor(Color.parseColor("#2ECC71"))
-                textSize = 11f
-                setPadding(8, 0, 8, 0)
-                setOnClickListener { showStepTypeMenu(path) }
+                textSize = 10f
+                setPadding(6, 0, 6, 0)
+                setOnClickListener {
+                    insertPath = path
+                    updateInsertLabel()
+                }
             }
-        } else null
+            row.addView(num)
+            row.addView(infoLayout)
+            row.addView(btnInsert)
+        } else {
+            row.addView(num)
+            row.addView(infoLayout)
+        }
 
+        // 编辑/删除
         val btnEdit = TextView(context).apply {
-            text = "编辑"
+            text = "编"
             setTextColor(Color.parseColor("#3498DB"))
-            textSize = 11f
-            setPadding(10, 0, 10, 0)
+            textSize = 10f
+            setPadding(6, 0, 6, 0)
             setOnClickListener { listener?.onEditStep(path, step) }
         }
         val btnDel = TextView(context).apply {
             text = "删"
             setTextColor(Color.parseColor("#E74C3C"))
-            textSize = 11f
-            setPadding(10, 0, 10, 0)
+            textSize = 10f
+            setPadding(6, 0, 6, 0)
             setOnClickListener { listener?.onDeleteStep(path) }
         }
-
-        row.addView(num)
-        row.addView(infoLayout)
-        if (btnAddSub != null) row.addView(btnAddSub)
         row.addView(btnEdit)
         row.addView(btnDel)
+
         return row
     }
 
-    private fun showStepTypeMenu(path: List<Int>) {
-        val types = arrayOf(
-            StepType.CLICK,
-            StepType.LONG_PRESS,
-            StepType.TOUCH_DOWN,
-            StepType.TOUCH_UP,
-            StepType.RIGHT_CLICK,
-            StepType.RIGHT_CLICK_DOWN,
-            StepType.RIGHT_CLICK_UP,
-            StepType.SWIPE,
-            StepType.DELAY,
-            StepType.FIND_IMAGE,
-            StepType.FIND_TEXT,
-            StepType.IF,
-            StepType.LOOP
-        )
-        val names = types.map { it.displayName }.toTypedArray()
-        val dialog = android.app.AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog)
-            .setTitle("选择步骤类型")
-            .setItems(names) { _, which ->
-                listener?.onAddStep(types[which], path)
-            }
-            .setNegativeButton("取消", null)
-            .create()
-        dialog.window?.setType(android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
-        dialog.show()
+    private fun updateInsertLabel() {
+        val text = if (insertPath.isEmpty()) {
+            "▶ 插入位置：末尾"
+        } else {
+            val pos = insertPath.joinToString("→") { (it + 1).toString() }
+            "▶ 插入位置：第 $pos 个 IF 内"
+        }
+        insertLabel?.text = text
+    }
+
+    /**
+     * 重置插入位置到末尾
+     */
+    fun resetInsertPosition() {
+        insertPath = emptyList()
+        updateInsertLabel()
     }
 }

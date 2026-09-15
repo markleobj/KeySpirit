@@ -227,6 +227,30 @@ class ScriptExecutor(
                 performLongPress(service, ox, oy, step.duration)
                 StepResult(true)
             }
+            StepType.SCREENSHOT -> {
+                // 执行截图（截取指定区域或全屏）
+                val captureService = com.keyspirit.service.ScreenCaptureService.instance
+                if (captureService != null) {
+                    val bitmap = captureService.captureScreen()
+                    if (bitmap != null && script.id.isNotBlank()) {
+                        val cropped = if (step.useRegion) {
+                            val cropLeft = step.regionLeft.coerceIn(0, bitmap.width - 1)
+                            val cropTop = step.regionTop.coerceIn(0, bitmap.height - 1)
+                            val cropRight = step.regionRight.coerceIn(cropLeft + 1, bitmap.width)
+                            val cropBottom = step.regionBottom.coerceIn(cropTop + 1, bitmap.height)
+                            android.graphics.Bitmap.createBitmap(
+                                bitmap, cropLeft, cropTop,
+                                cropRight - cropLeft, cropBottom - cropTop
+                            )
+                        } else bitmap
+                        val name = step.imageName.ifEmpty { null }
+                        com.keyspirit.util.ScreenshotUtils.saveToProject(
+                            service, cropped, script.id, name
+                        )
+                    }
+                }
+                StepResult(true)
+            }
             StepType.DELAY -> {
                 val delay = if (step.randomDelay > 0) {
                     step.delay + (Math.random() * step.randomDelay).toLong()

@@ -3409,6 +3409,7 @@ id italic
 id itemAccessibility
 id itemFloatingPermission
 id itemScreenCapture
+id itemStorage
 id item_touch_helper_previous_elevation
 id jumpToEnd
 id jumpToStart
@@ -3618,6 +3619,7 @@ id switchFloating
 id switchOffset
 id switchRandomDelay
 id switchScreenCapture
+id switchStorage
 id tabCode
 id tabMode
 id tabVisual

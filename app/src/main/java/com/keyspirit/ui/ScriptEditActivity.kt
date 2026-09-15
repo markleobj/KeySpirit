@@ -179,6 +179,10 @@ class ScriptEditActivity : AppCompatActivity() {
                 inputs["duration"] = addInput(layout, "时长(ms)", step.duration.toString())
                 addCoordinatePickerButton(layout, inputs["x"]!!, inputs["y"]!!)
             }
+            StepType.SCREENSHOT -> {
+                inputs["imageName"] = addInput(layout, "图片名称", step.imageName)
+                inputs["imagePath"] = addInput(layout, "图片路径", step.imagePath)
+            }
             StepType.DELAY -> {
                 inputs["delay"] = addInput(layout, "延迟(ms)", step.delay.toString())
                 inputs["randomDelay"] = addInput(layout, "随机延迟上限(ms)", step.randomDelay.toString())
@@ -341,6 +345,7 @@ class ScriptEditActivity : AppCompatActivity() {
         step.delay = safeLong("delay", 500)
         step.randomDelay = safeLong("randomDelay")
         step.imagePath = safeString("imagePath")
+        step.imageName = safeString("imageName")
         step.similarity = safeDouble("similarity", 0.9)
         step.text = safeString("text")
         step.loopCount = safeInt("loopCount", 1)

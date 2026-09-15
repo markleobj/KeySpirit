@@ -1,22 +1,26 @@
 [
     {
-        "merged": "com.keyspirit.app-mergeDebugResources-33:/layout/activity_script_edit.xml",
-        "source": "com.keyspirit.app-main-36:/layout/activity_script_edit.xml"
+        "merged": "/root/.gradle/daemon/8.7/com.keyspirit.app-mergeDebugResources-33:/layout/activity_script_edit.xml",
+        "source": "/root/.gradle/daemon/8.7/com.keyspirit.app-main-36:/layout/activity_script_edit.xml"
     },
     {
-        "merged": "com.keyspirit.app-mergeDebugResources-33:/layout/activity_main.xml",
-        "source": "com.keyspirit.app-main-36:/layout/activity_main.xml"
+        "merged": "/root/.gradle/daemon/8.7/com.keyspirit.app-mergeDebugResources-33:/layout/activity_main.xml",
+        "source": "/root/.gradle/daemon/8.7/com.keyspirit.app-main-36:/layout/activity_main.xml"
+    },
+    {
+        "merged": "/root/.gradle/daemon/8.7/com.keyspirit.app-mergeDebugResources-33:/layout/item_step.xml",
+        "source": "/root/.gradle/daemon/8.7/com.keyspirit.app-main-36:/layout/item_step.xml"
     },
     {
         "merged": "com.keyspirit.app-mergeDebugResources-33:/layout/activity_settings.xml",
         "source": "com.keyspirit.app-main-36:/layout/activity_settings.xml"
     },
     {
-        "merged": "com.keyspirit.app-mergeDebugResources-33:/layout/item_script.xml",
-        "source": "com.keyspirit.app-main-36:/layout/item_script.xml"
+        "merged": "/root/.gradle/daemon/8.7/com.keyspirit.app-mergeDebugResources-33:/layout/item_script.xml",
+        "source": "/root/.gradle/daemon/8.7/com.keyspirit.app-main-36:/layout/item_script.xml"
     },
     {
-        "merged": "com.keyspirit.app-mergeDebugResources-33:/layout/item_step.xml",
-        "source": "com.keyspirit.app-main-36:/layout/item_step.xml"
+        "merged": "/root/.gradle/daemon/8.7/com.keyspirit.app-mergeDebugResources-33:/layout/activity_settings.xml",
+        "source": "/root/.gradle/daemon/8.7/com.keyspirit.app-main-36:/layout/activity_settings.xml"
     }
 ]

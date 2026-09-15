@@ -31,6 +31,9 @@ public final class ActivitySettingsBinding implements ViewBinding {
   public final LinearLayout itemScreenCapture;
 
   @NonNull
+  public final LinearLayout itemStorage;
+
+  @NonNull
   public final Switch switchAccessibility;
 
   @NonNull
@@ -46,23 +49,29 @@ public final class ActivitySettingsBinding implements ViewBinding {
   public final Switch switchScreenCapture;
 
   @NonNull
+  public final Switch switchStorage;
+
+  @NonNull
   public final TextView tvVersion;
 
   private ActivitySettingsBinding(@NonNull ScrollView rootView,
       @NonNull LinearLayout itemAccessibility, @NonNull LinearLayout itemFloatingPermission,
-      @NonNull LinearLayout itemScreenCapture, @NonNull Switch switchAccessibility,
-      @NonNull Switch switchFloating, @NonNull Switch switchOffset,
-      @NonNull Switch switchRandomDelay, @NonNull Switch switchScreenCapture,
+      @NonNull LinearLayout itemScreenCapture, @NonNull LinearLayout itemStorage,
+      @NonNull Switch switchAccessibility, @NonNull Switch switchFloating,
+      @NonNull Switch switchOffset, @NonNull Switch switchRandomDelay,
+      @NonNull Switch switchScreenCapture, @NonNull Switch switchStorage,
       @NonNull TextView tvVersion) {
     this.rootView = rootView;
     this.itemAccessibility = itemAccessibility;
     this.itemFloatingPermission = itemFloatingPermission;
     this.itemScreenCapture = itemScreenCapture;
+    this.itemStorage = itemStorage;
     this.switchAccessibility = switchAccessibility;
     this.switchFloating = switchFloating;
     this.switchOffset = switchOffset;
     this.switchRandomDelay = switchRandomDelay;
     this.switchScreenCapture = switchScreenCapture;
+    this.switchStorage = switchStorage;
     this.tvVersion = tvVersion;
   }
 
@@ -111,6 +120,12 @@ public final class ActivitySettingsBinding implements ViewBinding {
         break missingId;
       }
 
+      id = R.id.itemStorage;
+      LinearLayout itemStorage = ViewBindings.findChildViewById(rootView, id);
+      if (itemStorage == null) {
+        break missingId;
+      }
+
       id = R.id.switchAccessibility;
       Switch switchAccessibility = ViewBindings.findChildViewById(rootView, id);
       if (switchAccessibility == null) {
@@ -141,6 +156,12 @@ public final class ActivitySettingsBinding implements ViewBinding {
         break missingId;
       }
 
+      id = R.id.switchStorage;
+      Switch switchStorage = ViewBindings.findChildViewById(rootView, id);
+      if (switchStorage == null) {
+        break missingId;
+      }
+
       id = R.id.tvVersion;
       TextView tvVersion = ViewBindings.findChildViewById(rootView, id);
       if (tvVersion == null) {
@@ -148,8 +169,9 @@ public final class ActivitySettingsBinding implements ViewBinding {
       }
 
       return new ActivitySettingsBinding((ScrollView) rootView, itemAccessibility,
-          itemFloatingPermission, itemScreenCapture, switchAccessibility, switchFloating,
-          switchOffset, switchRandomDelay, switchScreenCapture, tvVersion);
+          itemFloatingPermission, itemScreenCapture, itemStorage, switchAccessibility,
+          switchFloating, switchOffset, switchRandomDelay, switchScreenCapture, switchStorage,
+          tvVersion);
     }
     String missingId = rootView.getResources().getResourceName(id);
     throw new NullPointerException("Missing required view with ID: ".concat(missingId));

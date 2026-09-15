@@ -46,6 +46,7 @@ id etScriptName
 id itemAccessibility
 id itemFloatingPermission
 id itemScreenCapture
+id itemStorage
 id scriptList
 id stepList
 id switchAccessibility
@@ -53,6 +54,7 @@ id switchFloating
 id switchOffset
 id switchRandomDelay
 id switchScreenCapture
+id switchStorage
 id tabCode
 id tabVisual
 id tvCurrentBadge
