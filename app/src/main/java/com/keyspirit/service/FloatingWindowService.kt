@@ -1184,7 +1184,15 @@ class FloatingWindowService : Service() {
                 val scriptId = script.id
                 val screenshots = com.keyspirit.util.ScreenshotUtils.listProjectScreenshots(this@FloatingWindowService, scriptId)
                 if (screenshots.isEmpty()) {
-                    toast("项目目录下还没有截图，请先用悬浮窗截图")
+                    android.app.AlertDialog.Builder(this@FloatingWindowService)
+                        .setTitle("提示")
+                        .setMessage("项目目录下还没有截图\n\n请先返回悬浮窗，使用「截图」功能截取目标图片后再试")
+                        .setPositiveButton("知道了", null)
+                        .create()
+                        .apply {
+                            window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                        }
+                        .show()
                     return@setOnClickListener
                 }
                 val fileNames = screenshots.map { it.name }.toTypedArray()
@@ -1200,7 +1208,15 @@ class FloatingWindowService : Service() {
                     .show()
             } catch (e: Exception) {
                 Log.e(TAG, "选图按钮异常", e)
-                toast("选图失败: ${e.message}")
+                android.app.AlertDialog.Builder(this@FloatingWindowService)
+                    .setTitle("选图失败")
+                    .setMessage(e.message ?: "未知错误")
+                    .setPositiveButton("确定", null)
+                    .create()
+                    .apply {
+                        window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                    }
+                    .show()
             }
         }
 
