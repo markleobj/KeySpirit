@@ -453,18 +453,26 @@ class ScriptExecutor(
     }
 
     private fun executeLoop(step: ScriptStep, allSteps: List<ScriptStep>, service: AutoAccessibilityService) {
-        // 边界安全检查：步骤列表为空时直接返回
-        if (allSteps.isEmpty()) {
-            Log.w(TAG, "executeLoop: 步骤列表为空，跳过循环")
-            return
+        // 新逻辑：优先使用 loopSteps 子步骤列表（块结构）
+        @Suppress("SENSELESS_COMPARISON")
+        val loopSteps = if (step.loopSteps != null && step.loopSteps.isNotEmpty()) {
+            step.loopSteps
+        } else {
+            // 兼容旧版本：使用索引引用方式
+            if (allSteps.isEmpty()) {
+                Log.w(TAG, "executeLoop: 步骤列表为空且无子步骤，跳过循环")
+                return
+            }
+            val start = step.loopStartIndex.coerceIn(0, allSteps.size - 1)
+            val end = step.loopEndIndex.coerceIn(start, allSteps.size - 1)
+            allSteps.subList(start, end + 1).toMutableList()
         }
-        val start = step.loopStartIndex.coerceIn(0, allSteps.size - 1)
-        val end = step.loopEndIndex.coerceIn(start, allSteps.size - 1)
-        val loopSteps = allSteps.subList(start, end + 1)
         val count = if (step.loopCount <= 0) 1 else step.loopCount
+        Log.d(TAG, "executeLoop: 循环 $count 次，${loopSteps.size} 个子步骤")
         for (i in 0 until count) {
             if (!isRunning) break
             while (isPaused && isRunning) sleep(100)
+            listener?.onLoopUpdate(i + 1, count)
             executeSteps(loopSteps, service)
         }
     }

@@ -45,7 +45,18 @@ object JsEngine {
                 }
                 StepType.FIND_IMAGE -> sb.appendLine("findImageClick(\"${step.imagePath}\", ${step.similarity});")
                 StepType.FIND_TEXT -> sb.appendLine("findTextClick(\"${step.text}\");")
-                StepType.LOOP -> sb.appendLine("// loop ${step.loopCount} times, steps ${step.loopStartIndex}-${step.loopEndIndex}")
+                StepType.LOOP -> {
+                    val count = if (step.loopCount == 0) "true" else step.loopCount.toString()
+                    sb.appendLine("for (let i = 0; i < $count; i++) {")
+                    @Suppress("SENSELESS_COMPARISON")
+                    if (step.loopSteps != null) {
+                        for (subStep in step.loopSteps) {
+                            sb.append("        ")
+                            appendStepCode(sb, subStep)
+                        }
+                    }
+                    sb.appendLine("    }")
+                }
                 StepType.IF -> {
                     val condName = when (step.conditionType) {
                         0 -> "findImage"
@@ -59,9 +70,15 @@ object JsEngine {
                     } else {
                         "\"${step.conditionText}\""
                     }
-                    val trueAction = if (step.ifTrueJump < 0) "// continue" else "goto step ${step.ifTrueJump + 1}"
-                    val falseAction = if (step.ifFalseJump < 0) "// continue" else "goto step ${step.ifFalseJump + 1}"
-                    sb.appendLine("// if ($condName($param)) { $trueAction } else { $falseAction }")
+                    sb.appendLine("if ($condName($param)) {")
+                    @Suppress("SENSELESS_COMPARISON")
+                    if (step.ifSteps != null) {
+                        for (subStep in step.ifSteps) {
+                            sb.append("        ")
+                            appendStepCode(sb, subStep)
+                        }
+                    }
+                    sb.appendLine("    }")
                 }
             }
         }
@@ -69,6 +86,35 @@ object JsEngine {
         sb.appendLine()
         sb.appendLine("main();")
         return sb.toString()
+    }
+
+    /**
+     * 将单个步骤转换为 JS 代码行（不含块结构）
+     */
+    private fun appendStepCode(sb: StringBuilder, step: ScriptStep) {
+        when (step.type) {
+            StepType.CLICK -> sb.appendLine("click(${step.x}, ${step.y});")
+            StepType.TOUCH_DOWN -> sb.appendLine("touchDown(${step.x}, ${step.y}, ${step.duration});")
+            StepType.TOUCH_UP -> sb.appendLine("touchUp(${step.x}, ${step.y});")
+            StepType.RIGHT_CLICK -> sb.appendLine("rightClick(${step.x}, ${step.y}, ${step.duration});")
+            StepType.RIGHT_CLICK_DOWN -> sb.appendLine("rightClickDown(${step.x}, ${step.y}, ${step.duration});")
+            StepType.RIGHT_CLICK_UP -> sb.appendLine("rightClickUp(${step.x}, ${step.y});")
+            StepType.MOVE_MOUSE -> sb.appendLine("moveMouse(${step.x}, ${step.y});")
+            StepType.PICK_POINT -> sb.appendLine("// pick point (${step.x}, ${step.y})")
+            StepType.SWIPE -> sb.appendLine("swipe(${step.x1}, ${step.y1}, ${step.x2}, ${step.y2}, ${step.duration});")
+            StepType.LONG_PRESS -> sb.appendLine("longPress(${step.x}, ${step.y}, ${step.duration});")
+            StepType.SCREENSHOT -> sb.appendLine("screenshot(\"${step.imageName}\");")
+            StepType.DELAY -> {
+                if (step.randomDelay > 0) {
+                    sb.appendLine("sleep(${step.delay} + Math.random() * ${step.randomDelay});")
+                } else {
+                    sb.appendLine("sleep(${step.delay});")
+                }
+            }
+            StepType.FIND_IMAGE -> sb.appendLine("findImageClick(\"${step.imagePath}\", ${step.similarity});")
+            StepType.FIND_TEXT -> sb.appendLine("findTextClick(\"${step.text}\");")
+            else -> sb.appendLine("// ${step.type.typeName}")
+        }
     }
 
     /**

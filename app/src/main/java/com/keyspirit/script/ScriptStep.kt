@@ -32,8 +32,10 @@ data class ScriptStep(
     var useRegion: Boolean = false,
     // 循环相关
     var loopCount: Int = 1,
-    var loopStartIndex: Int = 0,
-    var loopEndIndex: Int = 0,
+    var loopStartIndex: Int = 0,  // 已废弃：旧版本索引逻辑，保留用于兼容
+    var loopEndIndex: Int = 0,   // 已废弃：旧版本索引逻辑，保留用于兼容
+    // 循环块：循环体内执行的子步骤列表
+    var loopSteps: MutableList<ScriptStep> = mutableListOf(),
     // 条件判断相关
     var conditionType: Int = 0,  // 0=找图成功, 1=找文字成功, 2=找图失败, 3=找文字失败
     var conditionImagePath: String = "",
@@ -77,7 +79,11 @@ data class ScriptStep(
                 val regionStr = if (useRegion) " [区域:($regionLeft,$regionTop)-($regionRight,$regionBottom)]" else ""
                 "文字: \"$text\"$regionStr"
             }
-            StepType.LOOP -> "重复 $loopCount 次，步骤 ${loopStartIndex + 1}-${loopEndIndex + 1}"
+            StepType.LOOP -> {
+                @Suppress("SENSELESS_COMPARISON")
+                val count = if (loopSteps == null) 0 else loopSteps.size
+                "循环 ${if (loopCount == 0) "无限" else loopCount} 次（$count 个步骤）"
+            }
             StepType.IF -> {
                 val condStr = when (conditionType) {
                     0 -> "找到图: ${conditionImagePath.substringAfterLast('/')}"

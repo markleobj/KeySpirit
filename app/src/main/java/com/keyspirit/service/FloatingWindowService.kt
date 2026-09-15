@@ -396,7 +396,7 @@ class FloatingWindowService : Service() {
 
     /**
      * 根据路径获取父步骤列表
-     * 例如 path=[2, 1] 表示第3个步骤的ifSteps列表中的第2个步骤 → 返回该ifSteps列表
+     * 例如 path=[2, 1] 表示第3个步骤的子步骤列表中的第2个步骤 → 返回该子步骤列表
      */
     private fun getParentListByPath(path: List<Int>): MutableList<ScriptStep>? {
         if (path.isEmpty()) return null
@@ -408,7 +408,16 @@ class FloatingWindowService : Service() {
             if (idx !in currentList.indices) return null
             val step = currentList[idx]
             currentList = when (step.type) {
-                StepType.IF -> step.ifSteps
+                StepType.IF -> {
+                    @Suppress("SENSELESS_COMPARISON")
+                    if (step.ifSteps == null) step.ifSteps = mutableListOf()
+                    step.ifSteps
+                }
+                StepType.LOOP -> {
+                    @Suppress("SENSELESS_COMPARISON")
+                    if (step.loopSteps == null) step.loopSteps = mutableListOf()
+                    step.loopSteps
+                }
                 else -> return null
             }
         }
@@ -548,20 +557,61 @@ class FloatingWindowService : Service() {
                 return
             }
             val parentStep = currentList[idx]
-            if (parentStep.type != StepType.IF) {
-                Log.e(TAG, "addStepToPath: 路径无效 $path，第 $i 层不是 IF 类型")
-                toast("添加失败：插入位置不是条件块，已改加到末尾")
-                script.steps.add(step) // 兜底
-                return
+            // 支持 IF 和 LOOP 两种块类型
+            val childList = when (parentStep.type) {
+                StepType.IF -> {
+                    @Suppress("SENSELESS_COMPARISON")
+                    if (parentStep.ifSteps == null) parentStep.ifSteps = mutableListOf()
+                    parentStep.ifSteps
+                }
+                StepType.LOOP -> {
+                    @Suppress("SENSELESS_COMPARISON")
+                    if (parentStep.loopSteps == null) parentStep.loopSteps = mutableListOf()
+                    parentStep.loopSteps
+                }
+                else -> {
+                    Log.e(TAG, "addStepToPath: 路径无效 $path，第 $i 层不是 IF/LOOP 类型")
+                    toast("添加失败：插入位置不是条件/循环块，已改加到末尾")
+                    script.steps.add(step) // 兜底
+                    return
+                }
             }
             if (i == path.size - 1) {
                 // 到达目标父层，添加进去
-                parentStep.ifSteps.add(step)
+                childList.add(step)
                 return
             }
             // 继续深入
-            currentList = parentStep.ifSteps
+            currentList = childList
         }
+    }
+
+    /**
+     * 根据路径获取步骤子列表（用于查找 IF/LOOP 块的子步骤列表）
+     */
+    private fun getStepListByPath(path: List<Int>): MutableList<ScriptStep> {
+        val script = ensureEditingScript()
+        if (path.isEmpty()) return script.steps
+        var currentList: MutableList<ScriptStep> = script.steps
+        for (i in path.indices) {
+            val idx = path[i]
+            if (idx !in currentList.indices) return script.steps
+            val step = currentList[idx]
+            currentList = when (step.type) {
+                StepType.IF -> {
+                    @Suppress("SENSELESS_COMPARISON")
+                    if (step.ifSteps == null) step.ifSteps = mutableListOf()
+                    step.ifSteps
+                }
+                StepType.LOOP -> {
+                    @Suppress("SENSELESS_COMPARISON")
+                    if (step.loopSteps == null) step.loopSteps = mutableListOf()
+                    step.loopSteps
+                }
+                else -> return script.steps
+            }
+        }
+        return currentList
     }
 
     /**
@@ -1358,18 +1408,16 @@ class FloatingWindowService : Service() {
 
     /**
      * 循环步骤设置对话框
+     * 新逻辑：循环使用块结构，子步骤通过"+子"按钮添加到循环体内
      */
     private fun showLoopDialog(existingStep: ScriptStep?) {
-        val script = ensureEditingScript()
-        val totalSteps = script.steps.size
-
         val layout = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(dp2px(48), dp2px(32), dp2px(48), dp2px(16))
         }
 
         val tvCount = android.widget.TextView(this).apply {
-            text = "循环次数（0=无限）"
+            text = "循环次数（0=无限循环）"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 13f
         }
@@ -1381,38 +1429,8 @@ class FloatingWindowService : Service() {
         }
         layout.addView(etCount)
 
-        val tvStart = android.widget.TextView(this).apply {
-            text = "起始步骤序号（从1开始）"
-            setTextColor(android.graphics.Color.parseColor("#999999"))
-            textSize = 13f
-            setPadding(0, dp2px(16), 0, dp2px(4))
-        }
-        layout.addView(tvStart)
-        val etStart = android.widget.EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            val startIdx = existingStep?.loopStartIndex ?: 0
-            setText((startIdx + 1).toString())
-            setSingleLine()
-        }
-        layout.addView(etStart)
-
-        val tvEnd = android.widget.TextView(this).apply {
-            text = "结束步骤序号"
-            setTextColor(android.graphics.Color.parseColor("#999999"))
-            textSize = 13f
-            setPadding(0, dp2px(16), 0, dp2px(4))
-        }
-        layout.addView(tvEnd)
-        val etEnd = android.widget.EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            val endIdx = existingStep?.loopEndIndex ?: (totalSteps - 1).coerceAtLeast(0)
-            setText((endIdx + 1).toString())
-            setSingleLine()
-        }
-        layout.addView(etEnd)
-
         val tvHint = android.widget.TextView(this).apply {
-            text = "提示：循环将重复执行从起始步骤到结束步骤之间的所有步骤"
+            text = "提示：添加循环后，点击循环右侧的「+子」按钮，将步骤添加到循环体内"
             setTextColor(android.graphics.Color.parseColor("#999999"))
             textSize = 12f
             setPadding(0, dp2px(16), 0, 0)
@@ -1424,22 +1442,25 @@ class FloatingWindowService : Service() {
             .setView(layout)
             .setPositiveButton("确定") { _, _ ->
                 val count = etCount.text.toString().toIntOrNull() ?: 3
-                val start1 = etStart.text.toString().toIntOrNull() ?: 1
-                val end1 = etEnd.text.toString().toIntOrNull() ?: 1
-                if (totalSteps == 0) {
-                    toast("没有可循环的步骤，请先添加其他步骤")
-                    return@setPositiveButton
-                }
-                val startIdx = (start1 - 1).coerceIn(0, totalSteps - 1)
-                val endIdx = (end1 - 1).coerceIn(startIdx, totalSteps - 1)
                 val step = existingStep ?: ScriptStep(type = StepType.LOOP)
                 step.loopCount = count
-                step.loopStartIndex = startIdx
-                step.loopEndIndex = endIdx
                 if (existingStep == null) {
                     addStepToPath(step, pendingAddPath)
+                    Log.d(TAG, "Added LOOP step, path=$pendingAddPath, count=$count")
+                    // 自动将插入位置设为此循环块，方便用户继续添加子步骤
+                    val newIdx = if (pendingAddPath.isEmpty()) {
+                        ensureEditingScript().steps.size - 1
+                    } else {
+                        // 获取目标列表中的索引
+                        getStepListByPath(pendingAddPath).size - 1
+                    }
+                    val newInsertPath = pendingAddPath + newIdx
+                    editorView?.insertPath = newInsertPath
+                    editorView?.refreshStepList()
+                    toast("循环已添加，当前插入位置在循环内，请添加子步骤")
+                } else {
+                    editorView?.refreshStepList()
                 }
-                editorView?.refreshStepList()
             }
             .setNegativeButton("取消", null)
             .create()

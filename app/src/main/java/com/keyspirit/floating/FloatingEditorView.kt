@@ -246,10 +246,35 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             val row = createStepRow(index, step, currentPath, depth)
             stepContainer.addView(row)
 
-            // IF 块的子步骤（安全检查：ifSteps 可能为 null）
+            // IF 块的子步骤
             @Suppress("SENSELESS_COMPARISON")
             if (step.type == StepType.IF && step.ifSteps != null && step.ifSteps.isNotEmpty()) {
                 renderSteps(step.ifSteps, currentPath, depth + 1)
+                // 添加 IF 结束标记
+                stepContainer.addView(createEndMarker("条件结束", depth))
+            }
+            // LOOP 块的子步骤
+            @Suppress("SENSELESS_COMPARISON")
+            if (step.type == StepType.LOOP && step.loopSteps != null && step.loopSteps.isNotEmpty()) {
+                renderSteps(step.loopSteps, currentPath, depth + 1)
+                // 添加 LOOP 结束标记
+                stepContainer.addView(createEndMarker("循环结束", depth))
+            }
+        }
+    }
+
+    /**
+     * 创建块结束标记行
+     */
+    private fun createEndMarker(text: String, depth: Int): View {
+        return TextView(context).apply {
+            this.text = "── $text ──"
+            setTextColor(Color.parseColor("#555555"))
+            textSize = sp(R.dimen.editor_step_desc_size)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(R.dimen.spacing_xs), 0, dp(R.dimen.spacing_xs))
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                leftMargin = depth * dp(R.dimen.editor_indent)
             }
         }
     }
@@ -320,8 +345,8 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         infoLayout.addView(tvType)
         infoLayout.addView(tvDesc)
 
-        // IF 类型加一个「设为插入点」按钮
-        if (step.type == StepType.IF) {
+        // IF 和 LOOP 类型加一个「设为插入点」按钮
+        if (step.type == StepType.IF || step.type == StepType.LOOP) {
             val btnInsert = TextView(context).apply {
                 text = "+子"
                 setTextColor(Color.parseColor("#2ECC71"))
@@ -366,7 +391,7 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             "▶ 插入位置：末尾"
         } else {
             val pos = insertPath.joinToString("→") { (it + 1).toString() }
-            "▶ 插入位置：第 $pos 个 IF 内"
+            "▶ 插入位置：第 $pos 块内"
         }
         insertLabel?.text = text
     }
