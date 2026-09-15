@@ -257,6 +257,8 @@ class FloatingWindowService : Service() {
     private var editingScript: Script? = null
     // 待添加的步骤类型（交互式选取完成后回填）
     private var pendingStepType: StepType? = null
+    // 待添加步骤的路径（空列表表示根级别，非空表示添加到某个 IF 块内）
+    private var pendingAddPath: List<Int> = emptyList()
 
     /**
      * 确保 editingScript 存在且 steps 不为 null
@@ -292,10 +294,10 @@ class FloatingWindowService : Service() {
         editorView = com.keyspirit.floating.FloatingEditorView(this).apply {
             setScript(script)
             listener = object : com.keyspirit.floating.FloatingEditorView.EditorListener {
-                override fun onAddStep(type: StepType) {
-                    handleAddStep(type)
+                override fun onAddStep(type: StepType, path: List<Int>) {
+                    handleAddStep(type, path)
                 }
-                override fun onEditStep(position: Int, step: ScriptStep) {
+                override fun onEditStep(path: List<Int>, step: ScriptStep) {
                     // 编辑步骤：根据类型重新交互式设置
                     pendingStepType = step.type
                     when (step.type) {
@@ -311,9 +313,13 @@ class FloatingWindowService : Service() {
                         else -> {}
                     }
                 }
-                override fun onDeleteStep(position: Int) {
-                    ensureEditingScript().steps.removeAt(position)
-                    editorView?.refreshStepList()
+                override fun onDeleteStep(path: List<Int>) {
+                    val parentList = getParentListByPath(path)
+                    val index = path.last()
+                    if (parentList != null && index in parentList.indices) {
+                        parentList.removeAt(index)
+                        editorView?.refreshStepList()
+                    }
                 }
                 override fun onSave() {
                     ensureEditingScript().let {
@@ -353,6 +359,47 @@ class FloatingWindowService : Service() {
         }
     }
 
+    /**
+     * 根据路径获取父步骤列表
+     * 例如 path=[2, 1] 表示第3个步骤的ifSteps列表中的第2个步骤 → 返回该ifSteps列表
+     */
+    private fun getParentListByPath(path: List<Int>): MutableList<ScriptStep>? {
+        if (path.isEmpty()) return null
+        val script = ensureEditingScript()
+        var currentList: MutableList<ScriptStep> = script.steps
+        // 遍历到倒数第二层（父层）
+        for (i in 0 until path.size - 1) {
+            val idx = path[i]
+            if (idx !in currentList.indices) return null
+            val step = currentList[idx]
+            currentList = when (step.type) {
+                StepType.IF -> step.ifSteps
+                else -> return null
+            }
+        }
+        return currentList
+    }
+
+    /**
+     * 根据路径获取步骤
+     */
+    private fun getStepByPath(path: List<Int>): ScriptStep? {
+        if (path.isEmpty()) return null
+        val script = ensureEditingScript()
+        var currentList: MutableList<ScriptStep> = script.steps
+        for (i in path.indices) {
+            val idx = path[i]
+            if (idx !in currentList.indices) return null
+            val step = currentList[idx]
+            if (i == path.size - 1) return step
+            currentList = when (step.type) {
+                StepType.IF -> step.ifSteps
+                else -> return null
+            }
+        }
+        return null
+    }
+
     private fun closeEditor() {
         editorView?.let {
             try { windowManager.removeView(it) } catch (_: Exception) {}
@@ -386,10 +433,11 @@ class FloatingWindowService : Service() {
     /**
      * 处理添加步骤：根据类型进入不同的交互式选取流程
      */
-    private fun handleAddStep(type: StepType) {
+    private fun handleAddStep(type: StepType, path: List<Int> = emptyList()) {
         pendingStepType = type
+        pendingAddPath = path
         val script = ensureEditingScript()
-        Log.d(TAG, "handleAddStep: type=$type, current steps=${script.steps.size}")
+        Log.d(TAG, "handleAddStep: type=$type, path=$path, current steps=${script.steps.size}")
         when (type) {
             StepType.CLICK, StepType.LONG_PRESS,
             StepType.TOUCH_DOWN, StepType.TOUCH_UP,
@@ -402,9 +450,45 @@ class FloatingWindowService : Service() {
             StepType.IF -> showIfDialog(null)
             else -> {
                 // 其他类型直接添加空步骤
-                script.steps.add(ScriptStep(type = type))
+                addStepToPath(ScriptStep(type = type), path)
                 editorView?.refreshStepList()
             }
+        }
+    }
+
+    /**
+     * 将步骤添加到指定路径的父列表末尾
+     * path = [] → 根级别（script.steps）
+     * path = [2] → 第3个步骤是 IF，加到它的 ifSteps 里
+     * path = [2, 1] → 第3个步骤的ifSteps中第2个是 IF，加到内层 ifSteps 里
+     */
+    private fun addStepToPath(step: ScriptStep, path: List<Int>) {
+        val script = ensureEditingScript()
+        if (path.isEmpty()) {
+            script.steps.add(step)
+            return
+        }
+        var currentList: MutableList<ScriptStep> = script.steps
+        for (i in path.indices) {
+            val idx = path[i]
+            if (idx !in currentList.indices) {
+                Log.e(TAG, "addStepToPath: 路径无效 $path，索引 $idx 越界")
+                script.steps.add(step) // 兜底
+                return
+            }
+            val parentStep = currentList[idx]
+            if (parentStep.type != StepType.IF) {
+                Log.e(TAG, "addStepToPath: 路径无效 $path，第 $i 层不是 IF 类型")
+                script.steps.add(step) // 兜底
+                return
+            }
+            if (i == path.size - 1) {
+                // 到达目标父层，添加进去
+                parentStep.ifSteps.add(step)
+                return
+            }
+            // 继续深入
+            currentList = parentStep.ifSteps
         }
     }
 
@@ -440,10 +524,9 @@ class FloatingWindowService : Service() {
                         }
                         step.x = x
                         step.y = y
-                        val script = ensureEditingScript()
                         if (existingStep == null) {
-                            script.steps.add(step)
-                            Log.d(TAG, "Added ${type.displayName} step at ($x, $y), total steps=${script.steps.size}")
+                            addStepToPath(step, pendingAddPath)
+                            Log.d(TAG, "Added ${type.displayName} step at ($x, $y), path=$pendingAddPath")
                         }
                         openEditor()
                         toast("已设置${type.displayName}: ($x, $y)")
@@ -507,10 +590,9 @@ class FloatingWindowService : Service() {
                             swipeStep?.y2 = y
                             removePickerOverlay()
                             floatingBall?.visibility = View.VISIBLE
-                            val script = ensureEditingScript()
                             if (existingStep == null) {
-                                script.steps.add(swipeStep!!)
-                                Log.d(TAG, "Added SWIPE step, total steps=${script.steps.size}")
+                                addStepToPath(swipeStep!!, pendingAddPath)
+                                Log.d(TAG, "Added SWIPE step, path=$pendingAddPath")
                             }
                             swipeStep = null
                             openEditor()
@@ -743,8 +825,8 @@ class FloatingWindowService : Service() {
                             step.regionBottom = bottom
                             step.useRegion = true
                             if (existingStep == null) {
-                                script.steps.add(step)
-                                Log.d(TAG, "Added FIND_IMAGE step, total steps=${script.steps.size}")
+                                addStepToPath(step, pendingAddPath)
+                                Log.d(TAG, "Added FIND_IMAGE step, path=$pendingAddPath")
                             }
                             toast("✓ 已截图并保存 (${cropped.width}x${cropped.height})")
                         } else {
@@ -878,8 +960,8 @@ class FloatingWindowService : Service() {
                     step.regionBottom = bottom
                     step.useRegion = true
                     if (existingStep == null) {
-                        script.steps.add(step)
-                        Log.d(TAG, "Added FIND_TEXT step, total steps=${script.steps.size}")
+                        addStepToPath(step, pendingAddPath)
+                        Log.d(TAG, "Added FIND_TEXT step, path=$pendingAddPath")
                     }
                 }
                 openEditor()
@@ -904,12 +986,11 @@ class FloatingWindowService : Service() {
             .setView(input)
             .setPositiveButton("确定") { _, _ ->
                 val ms = input.text.toString().toLongOrNull() ?: 500
-                val script = ensureEditingScript()
                 val step = existingStep ?: ScriptStep(type = StepType.DELAY)
                 step.delay = ms
                 if (existingStep == null) {
-                    script.steps.add(step)
-                    Log.d(TAG, "Added DELAY step, total steps=${script.steps.size}")
+                    addStepToPath(step, pendingAddPath)
+                    Log.d(TAG, "Added DELAY step, path=$pendingAddPath")
                 }
                 editorView?.refreshStepList()
             }
@@ -1002,7 +1083,7 @@ class FloatingWindowService : Service() {
                 step.loopStartIndex = startIdx
                 step.loopEndIndex = endIdx
                 if (existingStep == null) {
-                    script.steps.add(step)
+                    addStepToPath(step, pendingAddPath)
                 }
                 editorView?.refreshStepList()
             }
@@ -1249,7 +1330,7 @@ class FloatingWindowService : Service() {
                     step.ifSteps = ifStepsCopy
 
                     if (existingStep == null) {
-                        script.steps.add(step)
+                        addStepToPath(step, pendingAddPath)
                     }
                     editorView?.refreshStepList()
                     toast("已保存条件判断步骤")
@@ -1271,7 +1352,10 @@ class FloatingWindowService : Service() {
      */
     private fun showIfBlockStepsDialog(ifSteps: MutableList<ScriptStep>, onChanged: () -> Unit) {
         val stepTypesForBlock = arrayOf(
-            StepType.CLICK, StepType.LONG_PRESS, StepType.SWIPE,
+            StepType.CLICK, StepType.LONG_PRESS,
+            StepType.TOUCH_DOWN, StepType.TOUCH_UP,
+            StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP,
+            StepType.SWIPE,
             StepType.DELAY, StepType.FIND_IMAGE, StepType.FIND_TEXT
         )
         val typeNames = stepTypesForBlock.map { it.displayName }.toTypedArray()
@@ -1307,7 +1391,8 @@ class FloatingWindowService : Service() {
                         // 复用 handleAddStep 逻辑，但把步骤加到 ifSteps 里
                         when (type) {
                             StepType.CLICK, StepType.LONG_PRESS,
-                            StepType.TOUCH_DOWN, StepType.TOUCH_UP -> {
+                            StepType.TOUCH_DOWN, StepType.TOUCH_UP,
+                            StepType.RIGHT_CLICK, StepType.RIGHT_CLICK_DOWN, StepType.RIGHT_CLICK_UP -> {
                                 startCoordinatePickForIfBlock(type, ifSteps) {
                                     tvSteps.text = buildStepsText()
                                     onChanged()
