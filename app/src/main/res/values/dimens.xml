@@ -43,23 +43,23 @@
     <dimen name="edit_back_btn">40dp</dimen>
 
     <!-- 悬浮球 -->
-    <dimen name="floating_ball_size">56dp</dimen>
+    <dimen name="floating_ball_size">48dp</dimen>
 
     <!-- 指示器 -->
-    <dimen name="mouse_indicator_size">24dp</dimen>
-    <dimen name="touch_indicator_size">30dp</dimen>
-    <dimen name="indicator_stroke_width">3dp</dimen>
-    <dimen name="indicator_elevation">10dp</dimen>
+    <dimen name="mouse_indicator_size">20dp</dimen>
+    <dimen name="touch_indicator_size">24dp</dimen>
+    <dimen name="indicator_stroke_width">2dp</dimen>
+    <dimen name="indicator_elevation">8dp</dimen>
 
     <!-- 悬浮面板按钮 -->
-    <dimen name="floating_btn_text_size">14sp</dimen>
-    <dimen name="floating_btn_padding_h">24dp</dimen>
-    <dimen name="floating_btn_padding_v">16dp</dimen>
-    <dimen name="floating_btn_margin">8dp</dimen>
-    <dimen name="floating_panel_padding">16dp</dimen>
-    <dimen name="floating_panel_radius">24dp</dimen>
-    <dimen name="floating_info_text_size">12sp</dimen>
-    <dimen name="floating_info_padding_h">8dp</dimen>
+    <dimen name="floating_btn_text_size">12sp</dimen>
+    <dimen name="floating_btn_padding_h">12dp</dimen>
+    <dimen name="floating_btn_padding_v">8dp</dimen>
+    <dimen name="floating_btn_margin">6dp</dimen>
+    <dimen name="floating_panel_padding">8dp</dimen>
+    <dimen name="floating_panel_radius">10dp</dimen>
+    <dimen name="floating_info_text_size">10sp</dimen>
+    <dimen name="floating_info_padding_h">6dp</dimen>
 
     <!-- 悬浮编辑器 -->
     <dimen name="editor_padding">8dp</dimen>

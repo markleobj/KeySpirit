@@ -26,7 +26,8 @@ class FloatingPanelView(context: Context) : LinearLayout(context) {
     private val container: LinearLayout
 
     private fun dp(id: Int): Int = context.resources.getDimensionPixelSize(id)
-    private fun sp(id: Int): Float = context.resources.getDimension(id)
+    @Suppress("DEPRECATION")
+    private fun sp(id: Int): Float = context.resources.getDimension(id) / context.resources.displayMetrics.scaledDensity
 
     init {
         orientation = HORIZONTAL

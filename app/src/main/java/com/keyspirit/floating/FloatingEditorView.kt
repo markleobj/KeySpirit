@@ -22,7 +22,8 @@ import com.keyspirit.script.StepType
 class FloatingEditorView(context: Context) : LinearLayout(context) {
 
     private fun dp(id: Int): Int = context.resources.getDimensionPixelSize(id)
-    private fun sp(id: Int): Float = context.resources.getDimension(id)
+    @Suppress("DEPRECATION")
+    private fun sp(id: Int): Float = context.resources.getDimension(id) / context.resources.displayMetrics.scaledDensity
 
     interface EditorListener {
         fun onAddCommand(type: StepType, path: List<Int>)
@@ -66,7 +67,7 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
         setPadding(dp(R.dimen.editor_padding), dp(R.dimen.editor_padding), dp(R.dimen.editor_padding), dp(R.dimen.editor_padding))
         background = GradientDrawable().apply {
             setColor(Color.parseColor("#F01E1E1E"))
-            cornerRadius = sp(R.dimen.editor_radius)
+            cornerRadius = dp(R.dimen.editor_radius).toFloat()
         }
 
         // ========== 左边：命令面板 ==========
@@ -202,7 +203,7 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             setPadding(dp(R.dimen.editor_cmd_padding_h), dp(R.dimen.editor_cmd_padding_v), dp(R.dimen.editor_cmd_padding_h), dp(R.dimen.editor_cmd_padding_v))
             background = GradientDrawable().apply {
                 setColor(Color.parseColor(color))
-                cornerRadius = sp(R.dimen.editor_cmd_radius)
+                cornerRadius = dp(R.dimen.editor_cmd_radius).toFloat()
                 alpha = 200
             }
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
@@ -266,19 +267,19 @@ class FloatingEditorView(context: Context) : LinearLayout(context) {
             background = when {
                 step.type == StepType.IF -> GradientDrawable().apply {
                     setColor(Color.parseColor("#1A3498DB"))
-                    cornerRadius = sp(R.dimen.editor_step_radius)
+                    cornerRadius = dp(R.dimen.editor_step_radius).toFloat()
                 }
                 step.type == StepType.LOOP -> GradientDrawable().apply {
                     setColor(Color.parseColor("#1A9B59B6"))
-                    cornerRadius = sp(R.dimen.editor_step_radius)
+                    cornerRadius = dp(R.dimen.editor_step_radius).toFloat()
                 }
                 depth > 0 -> GradientDrawable().apply {
                     setColor(Color.parseColor("#252525"))
-                    cornerRadius = sp(R.dimen.editor_step_radius)
+                    cornerRadius = dp(R.dimen.editor_step_radius).toFloat()
                 }
                 else -> GradientDrawable().apply {
                     setColor(Color.parseColor("#2A2A2A"))
-                    cornerRadius = sp(R.dimen.editor_step_radius)
+                    cornerRadius = dp(R.dimen.editor_step_radius).toFloat()
                 }
             }
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {

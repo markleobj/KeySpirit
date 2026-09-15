@@ -42,24 +42,11 @@
     <dimen name="edit_code_size">16sp</dimen>
     <dimen name="edit_back_btn">48dp</dimen>
 
-    <!-- 悬浮球 -->
-    <dimen name="floating_ball_size">72dp</dimen>
+    <!-- 悬浮球（不随屏幕放大，使用基础值） -->
 
-    <!-- 指示器 -->
-    <dimen name="mouse_indicator_size">32dp</dimen>
-    <dimen name="touch_indicator_size">38dp</dimen>
-    <dimen name="indicator_stroke_width">4dp</dimen>
-    <dimen name="indicator_elevation">10dp</dimen>
+    <!-- 指示器（不随屏幕放大，使用基础值） -->
 
-    <!-- 悬浮面板按钮 -->
-    <dimen name="floating_btn_text_size">18sp</dimen>
-    <dimen name="floating_btn_padding_h">32dp</dimen>
-    <dimen name="floating_btn_padding_v">20dp</dimen>
-    <dimen name="floating_btn_margin">16dp</dimen>
-    <dimen name="floating_panel_padding">24dp</dimen>
-    <dimen name="floating_panel_radius">32dp</dimen>
-    <dimen name="floating_info_text_size">15sp</dimen>
-    <dimen name="floating_info_padding_h">16dp</dimen>
+    <!-- 悬浮面板按钮（不随屏幕放大，使用基础值） -->
 
     <!-- 悬浮编辑器 -->
     <dimen name="editor_padding">16dp</dimen>
